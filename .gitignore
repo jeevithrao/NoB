@@ -1,0 +1,11 @@
+# Python
+backend/venv/
+backend/.env
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/media/
+
+# General
+.DS_Store
+*.egg-info/
