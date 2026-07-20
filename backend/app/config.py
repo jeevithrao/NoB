@@ -18,6 +18,18 @@ class Settings(BaseSettings):
     IMAGE_DIR: str = "./media/images"
     BASE_URL: str = "http://localhost:8000"
 
+    # Payments
+    # When True, /purchases auto-completes immediately instead of talking to a
+    # real gateway — lets us build/test the whole purchase -> download -> walk
+    # flow before Razorpay/Stripe keys exist.
+    MOCK_PAYMENTS: bool = True
+    RAZORPAY_KEY_ID: str | None = None
+    RAZORPAY_KEY_SECRET: str | None = None
+    RAZORPAY_WEBHOOK_SECRET: str | None = None
+
+    # Signed URL expiry for tour audio package downloads (seconds)
+    SIGNED_URL_EXPIRE_SECONDS: int = 3600
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

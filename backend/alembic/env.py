@@ -29,6 +29,13 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# Use the same DATABASE_URL_SYNC the app reads from .env instead of the
+# hardcoded placeholder in alembic.ini, so `alembic upgrade head` always
+# targets whatever DB this checkout is configured for.
+from app.config import settings  # noqa: E402
+
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL_SYNC)
+
 # Target metadata — Alembic compares this against the DB
 target_metadata = Base.metadata
 

@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "Neighbourhoods of Bangalore",
+    "slug": "nob-mobile",
+    "scheme": "nob",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nob.mobile",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "NoB uses your location to know when you've arrived at each stop on a walking tour, so it can play the right narration automatically.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "NoB uses your location during an active walk to trigger stop narration, even if the app is backgrounded.",
+        "UIBackgroundModes": ["audio", "location"]
+      }
+    },
+    "android": {
+      "package": "com.nob.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "FOREGROUND_SERVICE"]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "NoB uses your location during an active walk to trigger stop narration."
+        }
+      ]
+    ]
+  }
+}

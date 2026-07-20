@@ -1,0 +1,137 @@
+"""Seeds a couple of demo tours so the app is browsable/purchasable/walkable
+right away. Run with:  python -m app.seed
+Safe to re-run — skips creation if the admin user / tours already exist.
+"""
+
+import asyncio
+
+from app.core.security import hash_password
+from app.database import AsyncSessionLocal
+from app.models import Stop, Tour, User
+from sqlalchemy import select
+
+
+ADMIN_EMAIL = "admin@nob.app"
+ADMIN_PASSWORD = "AdminPass123!"
+
+
+TOURS = [
+    {
+        "name": "Malleshwaram Morning Market Walk",
+        "description": (
+            "A ~2km walk through Malleshwaram's flower and vegetable markets, "
+            "temple lanes, and century-old bungalows, tracing how one of "
+            "Bangalore's oldest planned extensions grew up around its 8th Cross market."
+        ),
+        "city": "Bangalore",
+        "cover_image": "https://images.unsplash.com/photo-1596484552834-6a58f850e0a1",
+        "duration_min": 45,
+        "distance_km": 2.0,
+        "price_paise": 19900,
+        "is_free": False,
+        "stops": [
+            {
+                "name": "Malleshwaram Circle",
+                "narrative_text": "Start at the circle — once the edge of the original 1889 plague-relocation extension.",
+                "lat": 13.0035, "lng": 77.5647, "trigger_radius_m": 30,
+                "audio_filename": "malleshwaram/01-circle.mp3",
+            },
+            {
+                "name": "8th Cross Market",
+                "narrative_text": "The flower and vegetable market that gives the neighbourhood its rhythm every morning.",
+                "lat": 13.0043, "lng": 77.5701, "trigger_radius_m": 30,
+                "audio_filename": "malleshwaram/02-market.mp3",
+            },
+            {
+                "name": "Kadu Malleshwara Temple",
+                "narrative_text": "The temple the neighbourhood is named after — older than the planned extension around it.",
+                "lat": 13.0071, "lng": 77.5665, "trigger_radius_m": 25,
+                "audio_filename": "malleshwaram/03-temple.mp3",
+            },
+        ],
+    },
+    {
+        "name": "Basavanagudi Heritage Trail",
+        "description": (
+            "Wander past Bull Temple, Bugle Rock, and the old Basavanagudi "
+            "bungalows on a walk through one of the city's most storied south-side neighbourhoods."
+        ),
+        "city": "Bangalore",
+        "cover_image": "https://images.unsplash.com/photo-1602216056096-3b40cc0c7728",
+        "duration_min": 60,
+        "distance_km": 2.6,
+        "price_paise": 24900,
+        "is_free": False,
+        "stops": [
+            {
+                "name": "Bugle Rock Park",
+                "narrative_text": "A 3-billion-year-old rock outcrop and one of the oldest geological formations in the city.",
+                "lat": 12.9432, "lng": 77.5715, "trigger_radius_m": 35,
+                "audio_filename": "basavanagudi/01-bugle-rock.mp3",
+            },
+            {
+                "name": "Bull Temple",
+                "narrative_text": "Home to one of the largest monolithic Nandi statues in India, carved from a single boulder.",
+                "lat": 12.9425, "lng": 77.5719, "trigger_radius_m": 30,
+                "audio_filename": "basavanagudi/02-bull-temple.mp3",
+            },
+        ],
+    },
+    {
+        "name": "Cubbon Park Free Sampler Walk",
+        "description": "A short free taster walk through Cubbon Park to try the app before buying a full tour.",
+        "city": "Bangalore",
+        "cover_image": "https://images.unsplash.com/photo-1585129918465-045a1e0d858b",
+        "duration_min": 20,
+        "distance_km": 1.0,
+        "price_paise": 0,
+        "is_free": True,
+        "stops": [
+            {
+                "name": "Cubbon Park Bandstand",
+                "narrative_text": "Built in 1927, this Victorian bandstand is one of the park's most recognisable landmarks.",
+                "lat": 12.9762, "lng": 77.5929, "trigger_radius_m": 30,
+                "audio_filename": "cubbon/01-bandstand.mp3",
+            },
+        ],
+    },
+]
+
+
+async def seed() -> None:
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(User).where(User.email == ADMIN_EMAIL))
+        admin = result.scalar_one_or_none()
+        if admin is None:
+            admin = User(
+                email=ADMIN_EMAIL,
+                password_hash=hash_password(ADMIN_PASSWORD),
+                full_name="NoB Admin",
+                role="admin",
+            )
+            db.add(admin)
+            print(f"Created admin user: {ADMIN_EMAIL} / {ADMIN_PASSWORD}")
+        else:
+            print(f"Admin user already exists: {ADMIN_EMAIL}")
+
+        for tour_data in TOURS:
+            result = await db.execute(select(Tour).where(Tour.name == tour_data["name"]))
+            if result.scalar_one_or_none() is not None:
+                print(f"Tour already exists, skipping: {tour_data['name']}")
+                continue
+
+            stops_data = tour_data.pop("stops")
+            tour = Tour(**tour_data, is_published=True)
+            db.add(tour)
+            await db.flush()
+
+            for i, stop_data in enumerate(stops_data, start=1):
+                db.add(Stop(tour_id=tour.id, order_index=i, **stop_data))
+
+            print(f"Created tour: {tour.name} ({len(stops_data)} stops)")
+
+        await db.commit()
+
+
+if __name__ == "__main__":
+    asyncio.run(seed())

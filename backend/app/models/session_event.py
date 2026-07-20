@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, ForeignKey, func
+from sqlalchemy import String, DateTime, ForeignKey, func, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
@@ -8,6 +8,7 @@ from app.database import Base
 
 class SessionEvent(Base):
     __tablename__ = "session_events"
+    __table_args__ = (UniqueConstraint("client_event_id", name="uq_session_events_client_event_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -17,6 +18,12 @@ class SessionEvent(Base):
     )
     stop_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("stops.id", ondelete="CASCADE"), nullable=False
+    )
+    # Client-generated UUID (mobile app mints this when the event happens,
+    # offline or not). Lets /sessions/{id}/events/batch dedupe safely when the
+    # offline sync queue retries a batch that partially succeeded before.
+    client_event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
     )
     event_type: Mapped[str] = mapped_column(String(30), nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(
