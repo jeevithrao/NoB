@@ -54,7 +54,15 @@ alembic upgrade head
 python -m app.seed
 # -> admin@nob.app / AdminPass123!  (CHANGE before this ever goes near prod)
 
-# 6. Run
+# 6. Generate real (robotic but genuinely playable) narration audio for
+#    every seeded stop, via espeak-ng + ffmpeg — swap for real recordings
+#    before shipping, but this makes the whole download -> GPS trigger ->
+#    playback -> audio_started/finished pipeline testable today instead
+#    of hitting a 404 on every stop.
+apt-get install -y espeak-ng ffmpeg   # if not already installed
+python -m app.generate_audio
+
+# 7. Run
 uvicorn app.main:app --reload
 ```
 
@@ -74,9 +82,12 @@ app/
 
 ## Known gaps / next steps
 
-- Real payment gateway integration (Razorpay recommended per the docs).
 - Real object storage (S3) for audio — currently serves from `media/` locally;
   the one seam to change is `_signed_audio_url()` in `routers/tours.py`.
+  Audio itself is currently robotic TTS (`python -m app.generate_audio`),
+  real enough to test playback end-to-end but not real narration — swap for
+  professionally recorded audio before shipping.
+- Real payment gateway integration (Razorpay recommended per the docs).
 - OTP verification step for signup.
 - Google sign-in.
 - Refund endpoint (business rule is written, no endpoint yet — needs the

@@ -48,11 +48,12 @@ Make sure the backend (`../backend`) is running and seeded
 
 ## Known gaps / next steps
 
-- **Audio files aren't hosted yet** — the seed data references filenames
-  like `malleshwaram/01-circle.mp3` but nothing serves them yet. Download
-  falls back to the raw remote URL on failure so the rest of the flow
-  (GPS trigger, playback attempt, event logging) still runs; drop real
-  files into `backend/media/audio/<path>` to make playback work end to end.
+- **Audio is placeholder TTS, not real narration** — run
+  `python -m app.generate_audio` in the backend (needs `espeak-ng` +
+  `ffmpeg`) to generate real, playable audio for every seeded stop. It's
+  robotic, but genuine enough to test the whole download → GPS trigger →
+  playback → event-logging pipeline end to end. Swap for real recordings
+  before shipping.
 - **Background location** — `expo-location`'s `watchPositionAsync` here only
   runs while the app is foregrounded/backgrounded-but-alive. True
   killed-app background tracking needs `startLocationUpdatesAsync` with a

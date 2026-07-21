@@ -32,6 +32,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [deviceId] = useState(getOrCreateDeviceId);
 
   useEffect(() => {
+    function handleSessionExpired() {
+      setUser(null);
+    }
+    window.addEventListener('nob:session-expired', handleSessionExpired);
+    return () => window.removeEventListener('nob:session-expired', handleSessionExpired);
+  }, []);
+
+  useEffect(() => {
     (async () => {
       const accessToken = localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
       const userJson = localStorage.getItem(STORAGE_KEYS.USER);

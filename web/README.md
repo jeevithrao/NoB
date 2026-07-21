@@ -44,7 +44,12 @@ Needs the backend running and seeded first (see `../backend/README.md`).
 
 ## What's implemented
 
-- Auth (signup/login/logout), session persisted in localStorage
+- Auth (signup/login/logout), session persisted in localStorage, with
+  transparent access-token refresh: a 401 `TOKEN_EXPIRED` triggers one
+  refresh-and-retry automatically (concurrent requests share a single
+  in-flight refresh call), so a 60-minute access token never interrupts
+  someone mid-walk. If the refresh token itself is dead — expired, or the
+  account logged in elsewhere — the app drops back to logged-out state.
 - Home feed with the tour catalog
 - Tour detail: status-aware CTA (buy → start → continue → completed),
   likes, comments (gated on completed walk, same as backend/mobile)
@@ -60,6 +65,5 @@ Needs the backend running and seeded first (see `../backend/README.md`).
 - No offline file caching (Service Worker / Cache API) — audio streams
   live rather than being downloaded up front, unlike the mobile app.
   Worth adding if this needs to work in real dead zones.
-- No refresh-token rotation on 401 yet.
 - Manual "mark visited" buttons are a fallback for desktop testing where
   GPS doesn't move — remove or hide behind a dev flag before shipping.
