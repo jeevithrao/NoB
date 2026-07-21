@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    background-color: #EFE7D8;
+  }
+  body {
+    @apply bg-chunam text-kaapi font-body antialiased;
+    margin: 0;
+  }
+  h1, h2, h3, h4 {
+    @apply font-display;
+  }
+  :focus-visible {
+    outline: 2px solid #9A3324;
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  /* Perforated ticket edge — the signature motif. A repeating radial
+     gradient punches circular "holes" along the top edge of ticket cards. */
+  .ticket-perforation {
+    background-image: radial-gradient(circle at 8px 0, transparent 6px, #EFE7D8 6.5px);
+    background-size: 20px 12px;
+    background-repeat: repeat-x;
+    background-position: top left;
+  }
+
+  .stamp {
+    transform: rotate(-8deg);
+  }
+
+  .bg-grain::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+  }
+}
