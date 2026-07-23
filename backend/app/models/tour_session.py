@@ -13,13 +13,13 @@ class TourSession(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     tour_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("tours.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("tours.id", ondelete="CASCADE"), nullable=False, index=True
     )
     purchase_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("purchases.id", ondelete="SET NULL")
+        UUID(as_uuid=True), ForeignKey("purchases.id", ondelete="SET NULL"), index=True
     )
     stops_visited: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

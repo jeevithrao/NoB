@@ -64,16 +64,71 @@ async def list_tours(
         select(Tour).where(Tour.city == city, Tour.is_published.is_(True)).order_by(Tour.created_at.desc())
     )
     tours = result.scalars().all()
+    if not tours:
+        return []
+
+    tour_ids = [t.id for t in tours]
+
+    # Batch query like counts across all returned tours (O(1) database queries)
+    likes_result = await db.execute(
+        select(TourLike.tour_id, func.count(TourLike.id))
+        .where(TourLike.tour_id.in_(tour_ids))
+        .group_by(TourLike.tour_id)
+    )
+    like_counts = {row[0]: row[1] for row in likes_result.all()}
+
+    # Batch query user purchases and sessions if logged in
+    purchased_tour_ids = set()
+    latest_sessions = {}
+    if current_user is not None:
+        purchases_result = await db.execute(
+            select(Purchase.tour_id).where(
+                Purchase.user_id == current_user.id,
+                Purchase.tour_id.in_(tour_ids),
+                Purchase.status == "completed",
+            )
+        )
+        purchased_tour_ids = set(purchases_result.scalars().all())
+
+        sessions_result = await db.execute(
+            select(TourSession)
+            .where(
+                TourSession.user_id == current_user.id,
+                TourSession.tour_id.in_(tour_ids),
+            )
+            .order_by(TourSession.started_at.desc())
+        )
+        for sess in sessions_result.scalars().all():
+            if sess.tour_id not in latest_sessions:
+                latest_sessions[sess.tour_id] = sess
 
     items = []
     for tour in tours:
-        status_ = await _user_status_for_tour(db, current_user, tour)
-        like_count = await _like_count(db, tour.id)
+        if not tour.is_free:
+            if current_user is None or tour.id not in purchased_tour_ids:
+                status_ = "not_purchased"
+            else:
+                sess = latest_sessions.get(tour.id)
+                if sess is None:
+                    status_ = "purchased"
+                else:
+                    status_ = "completed_locked" if sess.completed else "in_progress"
+        else:
+            if current_user is None:
+                status_ = "purchased"
+            else:
+                sess = latest_sessions.get(tour.id)
+                if sess is None:
+                    status_ = "purchased"
+                else:
+                    status_ = "completed_locked" if sess.completed else "in_progress"
+
         item = TourListItem.model_validate(tour)
         item.status = status_
-        item.like_count = like_count
+        item.like_count = like_counts.get(tour.id, 0)
         items.append(item)
     return items
+
 
 
 @router.get("/{tour_id}", response_model=TourDetail)

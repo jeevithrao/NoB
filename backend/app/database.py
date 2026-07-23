@@ -4,13 +4,19 @@ from app.config import settings
 
 
 # Async engine — used by FastAPI at runtime
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    pool_size=10,
-    max_overflow=20,
-    pool_pre_ping=True,
-    echo=True        # logs all SQL queries — set to False in production
-)
+if settings.DATABASE_URL.startswith("sqlite"):
+    engine = create_async_engine(
+        settings.DATABASE_URL,
+        echo=True        # logs all SQL queries — set to False in production
+    )
+else:
+    engine = create_async_engine(
+        settings.DATABASE_URL,
+        pool_size=10,
+        max_overflow=20,
+        pool_pre_ping=True,
+        echo=True        # logs all SQL queries — set to False in production
+    )
 
 # Session factory
 AsyncSessionLocal = async_sessionmaker(
@@ -34,5 +40,3 @@ async def get_db():
         except Exception:
             await session.rollback()
             raise
-        finally:
-            await session.close()

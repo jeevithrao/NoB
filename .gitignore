@@ -9,3 +9,6 @@ backend/media/
 # General
 .DS_Store
 *.egg-info/
+*.db
+*.sqlite
+*.sqlite3

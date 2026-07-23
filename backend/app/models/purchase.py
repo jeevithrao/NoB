@@ -14,15 +14,15 @@ class Purchase(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     tour_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("tours.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("tours.id", ondelete="CASCADE"), nullable=False, index=True
     )
     gateway_order_id: Mapped[str | None] = mapped_column(String(255), unique=True)
     gateway_payment_id: Mapped[str | None] = mapped_column(String(255), unique=True)
     amount_paise: Mapped[int] = mapped_column(Integer, nullable=False)
-    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False, index=True)
     device_id: Mapped[str | None] = mapped_column(String(255))
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
