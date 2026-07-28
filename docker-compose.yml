@@ -6,13 +6,48 @@ services:
     container_name: nob_db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: nob_user
-      POSTGRES_PASSWORD: nob_password
-      POSTGRES_DB: nob_db
+      POSTGRES_USER: ${DB_USER:-ethnowalk_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-ethnodb26}
+      POSTGRES_DB: ${DB_NAME:-NoB_db}
     ports:
       - "5432:5432"
     volumes:
       - nob_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-ethnowalk_user} -d ${DB_NAME:-NoB_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nob_backend
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${DB_USER:-ethnowalk_user}:${DB_PASSWORD:-ethnodb26}@db:5432/${DB_NAME:-NoB_db}
+      - DATABASE_URL_SYNC=postgresql://${DB_USER:-ethnowalk_user}:${DB_PASSWORD:-ethnodb26}@db:5432/${DB_NAME:-NoB_db}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend/media:/app/media
+    expose:
+      - "8000"
+
+  nginx:
+    image: nginx:alpine
+    container_name: nob_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./backend/media:/app/media:ro
+    depends_on:
+      - backend
 
 volumes:
   nob_db_data:

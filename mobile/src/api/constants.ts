@@ -4,7 +4,7 @@
  * http://192.168.1.23:8000) or an ngrok/tunnel URL. Android emulators can
  * use http://10.0.2.2:8000 to reach the host machine.
  */
-export const API_BASE_URL = 'http://localhost:8000';
+export const API_BASE_URL = 'http://192.168.1.5:8000';
 
 export const STORAGE_KEYS = {
   ACCESS_TOKEN: 'nob:access_token',

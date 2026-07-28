@@ -1,14 +1,38 @@
-# Python
-backend/venv/
-backend/.env
-backend/__pycache__/
-backend/**/__pycache__/
-backend/**/*.pyc
-backend/media/
+# Dependencies & virtual environments
+node_modules/
+**/node_modules/
+venv/
+**/venv/
+.venv/
+**/.venv/
 
-# General
-.DS_Store
+# Environment files
+.env
+**/.env
+!.env.example
+!**/.env.example
+
+# Python
+__pycache__/
+**/__pycache__/
+*.pyc
 *.egg-info/
+
+# Web / Build outputs
+dist/
+**/dist/
+.expo/
+**/.expo/
+
+# Media uploads & local DBs
+backend/media/audio/*.wav
+backend/media/audio/*.mp3
 *.db
 *.sqlite
 *.sqlite3
+
+# System & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

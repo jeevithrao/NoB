@@ -50,7 +50,7 @@ async def _user_status_for_tour(db: AsyncSession, user: User | None, tour: Tour)
 
 
 async def _like_count(db: AsyncSession, tour_id: uuid.UUID) -> int:
-    result = await db.execute(select(func.count()).select_from(TourLike).where(TourLike.tour_id == tour_id))
+    result = await db.execute(select(func.count(TourLike.user_id)).where(TourLike.tour_id == tour_id))
     return result.scalar_one()
 
 
@@ -71,7 +71,7 @@ async def list_tours(
 
     # Batch query like counts across all returned tours (O(1) database queries)
     likes_result = await db.execute(
-        select(TourLike.tour_id, func.count(TourLike.id))
+        select(TourLike.tour_id, func.count(TourLike.user_id))
         .where(TourLike.tour_id.in_(tour_ids))
         .group_by(TourLike.tour_id)
     )

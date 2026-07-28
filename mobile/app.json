@@ -13,7 +13,10 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "NoB uses your location to know when you've arrived at each stop on a walking tour, so it can play the right narration automatically.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "NoB uses your location during an active walk to trigger stop narration, even if the app is backgrounded.",
-        "UIBackgroundModes": ["audio", "location"]
+        "UIBackgroundModes": [
+          "audio",
+          "location"
+        ]
       }
     },
     "android": {
@@ -25,7 +28,13 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "FOREGROUND_SERVICE"]
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "FOREGROUND_SERVICE",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -37,6 +46,11 @@
           "locationAlwaysAndWhenInUsePermission": "NoB uses your location during an active walk to trigger stop narration."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "f76246db-a07e-475a-b747-9c15fb14688e"
+      }
+    }
   }
 }

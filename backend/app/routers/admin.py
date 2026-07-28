@@ -1,6 +1,8 @@
+import os
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import aiofiles
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -126,3 +128,31 @@ async def reset_session(
             purchase.locked_at = None
 
     await db.commit()
+
+
+@router.post("/audio/upload", status_code=status.HTTP_201_CREATED)
+async def upload_audio(
+    file: UploadFile = File(...),
+    subfolder: str = "general",
+    _admin: User = Depends(get_current_admin),
+):
+    """Upload an MP3 audio file for a tour stop.
+    subfolder should be the neighbourhood slug, e.g. 'malleshwaram'.
+    The filename must match exactly what's stored in the stops.audio_filename column.
+    """
+    if not (file.filename or "").lower().endswith(".mp3"):
+        raise _api_error(status.HTTP_400_BAD_REQUEST, "INVALID_FILE_TYPE", "Only .mp3 files are accepted.")
+
+    folder_path = os.path.join("media", "audio", subfolder)
+    os.makedirs(folder_path, exist_ok=True)
+    file_path = os.path.join(folder_path, file.filename)
+
+    content = await file.read()
+    async with aiofiles.open(file_path, "wb") as f:
+        await f.write(content)
+
+    return {
+        "filename": f"{subfolder}/{file.filename}",
+        "path": file_path,
+        "size_bytes": len(content),
+    }
