@@ -1,7 +1,7 @@
 import uuid
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +12,13 @@ from app.models import Purchase, Stop, Tour, TourLike, TourSession, User
 from app.schemas.tour import StopWithAudio, TourDetail, TourListItem, TourPackage
 
 router = APIRouter(prefix="/tours", tags=["tours"])
+
+# Shared with purchases.py via import — single source of truth for the copy
+# shown when a device-binding conflict is detected.
+_BOUND_TO_OTHER_DEVICE_MSG = (
+    "This tour was downloaded on another device. Re-download here to move it — "
+    "your other device will need to sign in again to use it."
+)
 
 
 def _api_error(status_code: int, code: str, message: str) -> HTTPException:
@@ -168,11 +175,14 @@ async def get_tour(
 @router.get("/{tour_id}/package", response_model=TourPackage)
 async def get_tour_package(
     tour_id: uuid.UUID,
+    x_device_id: str = Header(..., alias="X-Device-Id"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Stop manifest + signed audio URLs for offline download (Feature Spec 3).
-    Requires a completed purchase unless the tour is free."""
+    Requires a completed purchase unless the tour is free. The device header
+    is compared against the bound device_id to enforce the one-device-at-a-time
+    business rule (Business Rules §3a)."""
     tour = await db.get(Tour, tour_id)
     if tour is None or not tour.is_published:
         raise _api_error(status.HTTP_404_NOT_FOUND, "TOUR_NOT_FOUND", "Tour not found.")
@@ -189,6 +199,15 @@ async def get_tour_package(
         if purchase is None:
             raise _api_error(
                 status.HTTP_403_FORBIDDEN, "TOUR_NOT_OWNED", "You need to purchase this tour first."
+            )
+        # Device binding check — only reject if already bound to a *different* device.
+        # If unbound (device_id is None), binding happens via /bind-device before
+        # the walk starts; this gate just stops a second device from downloading.
+        if purchase.device_id is not None and purchase.device_id != x_device_id:
+            raise _api_error(
+                status.HTTP_409_CONFLICT,
+                "BOUND_TO_OTHER_DEVICE",
+                _BOUND_TO_OTHER_DEVICE_MSG,
             )
 
     stops_result = await db.execute(select(Stop).where(Stop.tour_id == tour.id).order_by(Stop.order_index))

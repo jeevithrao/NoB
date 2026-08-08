@@ -40,7 +40,10 @@ export const toursApi = {
 
   get: (tourId: string) => apiRequest<TourDetail>(`/tours/${tourId}`),
 
-  getPackage: (tourId: string) => apiRequest<TourPackage>(`/tours/${tourId}/package`),
+  getPackage: (tourId: string, deviceIdentifier: string) =>
+    apiRequest<TourPackage>(`/tours/${tourId}/package`, {
+      headers: { 'X-Device-Id': deviceIdentifier },
+    }),
 
   like: (tourId: string) => apiRequest(`/tours/${tourId}/like`, { method: 'POST' }),
   unlike: (tourId: string) => apiRequest(`/tours/${tourId}/like`, { method: 'DELETE' }),

@@ -9,6 +9,7 @@ from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import Purchase, Tour, User
+from app.routers.tours import _BOUND_TO_OTHER_DEVICE_MSG
 from app.schemas.purchase import (
     BindDeviceRequest,
     PaymentWebhookPayload,
@@ -36,10 +37,17 @@ async def create_purchase(
     if tour.is_free:
         raise _api_error(status.HTTP_400_BAD_REQUEST, "TOUR_IS_FREE", "This tour doesn't require purchase.")
 
-    existing = await db.execute(
-        select(Purchase).where(Purchase.user_id == current_user.id, Purchase.tour_id == tour.id)
+    # Query only for pending or completed rows — the partial index means failed
+    # purchases are excluded, so a retry after failure creates a fresh row.
+    existing_result = await db.execute(
+        select(Purchase).where(
+            Purchase.user_id == current_user.id,
+            Purchase.tour_id == tour.id,
+            Purchase.status.in_(["pending", "completed"]),
+        )
     )
-    purchase = existing.scalar_one_or_none()
+    purchase = existing_result.scalar_one_or_none()
+
     if purchase is not None and purchase.status == "completed":
         raise _api_error(status.HTTP_409_CONFLICT, "TOUR_ALREADY_OWNED", "You already own this tour.")
 
@@ -47,6 +55,7 @@ async def create_purchase(
         # Reuse the pending row rather than creating a duplicate order.
         pass
     else:
+        # status is failed or no row exists — create a fresh row with a new id
         purchase = Purchase(
             user_id=current_user.id,
             tour_id=tour.id,
@@ -113,8 +122,7 @@ async def bind_device(
         raise _api_error(
             status.HTTP_409_CONFLICT,
             "BOUND_TO_OTHER_DEVICE",
-            "This tour was downloaded on another device. Re-download here to move it — "
-            "your other device will need to sign in again to use it.",
+            _BOUND_TO_OTHER_DEVICE_MSG,
         )
 
     purchase.device_id = body.device_identifier

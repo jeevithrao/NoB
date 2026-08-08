@@ -34,7 +34,10 @@ export const authApi = {
 export const toursApi = {
   list: (city = 'Bangalore') => apiRequest<TourListItem[]>(`/tours?city=${encodeURIComponent(city)}`),
   get: (tourId: string) => apiRequest<TourDetail>(`/tours/${tourId}`),
-  getPackage: (tourId: string) => apiRequest<TourPackage>(`/tours/${tourId}/package`),
+  getPackage: (tourId: string, deviceIdentifier: string) =>
+    apiRequest<TourPackage>(`/tours/${tourId}/package`, {
+      headers: { 'X-Device-Id': deviceIdentifier },
+    }),
   like: (tourId: string) => apiRequest<{ liked: boolean; like_count: number }>(`/tours/${tourId}/like`, { method: 'POST' }),
   unlike: (tourId: string) => apiRequest<{ liked: boolean; like_count: number }>(`/tours/${tourId}/like`, { method: 'DELETE' }),
   listComments: (tourId: string) => apiRequest<CommentOut[]>(`/tours/${tourId}/comments`),
