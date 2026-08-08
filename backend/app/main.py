@@ -1,22 +1,23 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 
-from app.routers import admin, auth, purchases, sessions, social, tours
+from app.config import settings
+from app.routers import admin, auth, media, purchases, sessions, social, tours
 
 app = FastAPI(
-    title="NoB — Neighbourhoods of Bengaluru",
+    title="NoB \u2014 Neighbourhoods of Bengaluru",
     description="Backend API for the NoB audio walking tour app",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
 
-# CORS — allows the mobile app and admin panel to talk to this API
+# CORS \u2014 explicitly list allowed origins; never combine allow_origins=["*"]
+# with allow_credentials=True as browsers reject that combination.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten this in production
+    allow_origins=settings.allowed_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,10 +43,10 @@ app.include_router(purchases.router)
 app.include_router(sessions.router)
 app.include_router(social.router)
 app.include_router(admin.router)
-
-# Serves locally-uploaded audio/images during development. Swap for S3 +
-# signed URLs (see tours.py's _signed_audio_url) before production.
-app.mount("/media", StaticFiles(directory="media", check_dir=False), name="media")
+# Signed media serving \u2014 replaces the open StaticFiles mount.
+# Every /media/** request is validated against an HMAC-SHA256 signature
+# before the file is returned (see app/routers/media.py).
+app.include_router(media.router)
 
 
 @app.get("/")

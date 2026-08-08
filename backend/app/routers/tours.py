@@ -235,7 +235,18 @@ async def get_tour_package(
     )
 
 
+from app.core.security import sign_media_path
+
+
 def _signed_audio_url(audio_filename: str) -> str:
-    """Placeholder signer. Swap for real S3 presigned URLs once object storage
-    is wired up — kept as a single seam so that's a one-function change."""
-    return f"{settings.BASE_URL}/media/audio/{audio_filename}"
+    """Returns a time-limited HMAC-signed URL for the audio file.
+
+    The URL is valid for settings.SIGNED_URL_EXPIRE_SECONDS seconds. The mobile
+    app re-fetches the package if the URL has expired (the session TTL should
+    be set shorter than the signed URL TTL to avoid mid-walk expiry).
+    Swap the BASE_URL prefix for an S3/CDN domain once object storage is live.
+    """
+    path = f"/media/audio/{audio_filename}"
+    qs = sign_media_path(path, settings.SIGNED_URL_EXPIRE_SECONDS)
+    return f"{settings.BASE_URL}{path}{qs}"
+

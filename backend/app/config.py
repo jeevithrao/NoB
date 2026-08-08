@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+from typing import List
 
 
 class Settings(BaseSettings):
@@ -29,6 +30,27 @@ class Settings(BaseSettings):
 
     # Signed URL expiry for tour audio package downloads (seconds)
     SIGNED_URL_EXPIRE_SECONDS: int = 3600
+
+    # Media URL signing — HMAC key used to sign audio download URLs.
+    # Defaults to SECRET_KEY when not set. Set explicitly in production
+    # to rotate media keys independently of auth tokens.
+    MEDIA_SIGNING_KEY: str | None = None
+
+    # Debug — gates SQLAlchemy query logging (echo=True exposes passwords
+    # and JWTs in logs when not in development).
+    DEBUG: bool = False
+
+    # CORS — comma-separated list of allowed origins.
+    # Never use "*" with allow_credentials=True.
+    ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:3000,http://localhost:8081"
+
+    @property
+    def media_signing_key(self) -> str:
+        return self.MEDIA_SIGNING_KEY or self.SECRET_KEY
+
+    @property
+    def allowed_origins_list(self) -> List[str]:
+        return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
 
     class Config:
         env_file = ".env"
