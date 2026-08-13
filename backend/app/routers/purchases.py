@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import Purchase, Tour, User
+from app.models import Purchase, Tour, TourSession, User
 from app.routers.tours import _BOUND_TO_OTHER_DEVICE_MSG
 from app.schemas.purchase import (
     BindDeviceRequest,
@@ -129,6 +129,49 @@ async def bind_device(
     await db.commit()
     await db.refresh(purchase)
     return purchase
+
+
+@router.post("/purchases/{purchase_id}/refund", response_model=PurchaseOut)
+async def refund_purchase(
+    purchase_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Process a refund request for a completed purchase.
+
+    Business Rules (Phase 3 Task 5):
+    - If stops_visited == 0 (walk not started) → set status = 'refunded', unlock, return 200
+    - If stops_visited > 0 (walk started) → raise 409 REFUND_NOT_ELIGIBLE
+    """
+    purchase = await db.get(Purchase, purchase_id)
+    if purchase is None or purchase.user_id != current_user.id:
+        raise _api_error(status.HTTP_404_NOT_FOUND, "PURCHASE_NOT_FOUND", "Purchase not found.")
+
+    if purchase.status != "completed":
+        raise _api_error(status.HTTP_400_BAD_REQUEST, "PURCHASE_NOT_COMPLETED", "Only completed purchases can be refunded.")
+
+    # Check walk progress from the user's latest session for this tour
+    session_result = await db.execute(
+        select(TourSession)
+        .where(TourSession.user_id == current_user.id, TourSession.tour_id == purchase.tour_id)
+        .order_by(TourSession.started_at.desc())
+    )
+    session = session_result.scalars().first()
+
+    if session is not None and session.stops_visited > 0:
+        raise _api_error(
+            status.HTTP_409_CONFLICT,
+            "REFUND_NOT_ELIGIBLE",
+            "Refund refused: walk already started.",
+        )
+
+    purchase.status = "refunded"
+    purchase.is_locked = False
+    purchase.locked_at = None
+    await db.commit()
+    await db.refresh(purchase)
+    return purchase
+
 
 
 @router.post("/webhooks/payment", status_code=status.HTTP_204_NO_CONTENT)
