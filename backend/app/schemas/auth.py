@@ -33,3 +33,23 @@ class RefreshRequest(BaseModel):
 class SignupResponse(BaseModel):
     user_id: uuid.UUID
     message: str = "Account created."
+
+
+# OTP flow
+
+class OtpRequestBody(BaseModel):
+    email: EmailStr
+
+
+class OtpVerifyRequest(BaseModel):
+    email: EmailStr
+    otp: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+    device_identifier: str = Field(min_length=1, max_length=255)
+
+
+# Google Sign-In
+
+class GoogleSignInRequest(BaseModel):
+    id_token: str
+    device_identifier: str = Field(min_length=1, max_length=255)
+

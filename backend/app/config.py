@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_ID: str | None = None
     RAZORPAY_KEY_SECRET: str | None = None
     RAZORPAY_WEBHOOK_SECRET: str | None = None
+    GOOGLE_CLIENT_ID: str | None = None
 
     # Signed URL expiry for tour audio package downloads (seconds)
     SIGNED_URL_EXPIRE_SECONDS: int = 3600
