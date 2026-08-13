@@ -153,20 +153,53 @@ async def list_comments(tour_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
         select(TourComment)
         .where(TourComment.tour_id == tour_id, TourComment.is_deleted.is_(False))
         .order_by(TourComment.created_at.desc())
-        .options()
     )
     comments = result.scalars().all()
+    if not comments:
+        return []
 
-    out = []
-    for comment in comments:
-        user = await db.get(User, comment.user_id)
-        out.append(
-            CommentOut(
-                id=comment.id,
-                user_id=comment.user_id,
-                user_name=user.full_name if user else None,
-                content=comment.content,
-                created_at=comment.created_at,
-            )
+    # Batch query users to prevent N+1 queries (Phase 3 Task 4)
+    user_ids = list({comment.user_id for comment in comments})
+    users_result = await db.execute(select(User).where(User.id.in_(user_ids)))
+    users_map = {u.id: u for u in users_result.scalars().all()}
+
+    return [
+        CommentOut(
+            id=comment.id,
+            user_id=comment.user_id,
+            user_name=users_map[comment.user_id].full_name if comment.user_id in users_map else None,
+            content=comment.content,
+            created_at=comment.created_at,
         )
-    return out
+        for comment in comments
+    ]
+
+
+@router.delete("/tours/{tour_id}/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_comment(
+    tour_id: uuid.UUID,
+    comment_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a comment from a tour.
+
+    Permissions (Phase 3 Task 5):
+    - Comment author: allowed
+    - Admin user: allowed
+    - Other non-admin user: 403 FORBIDDEN
+    """
+    comment = await db.get(TourComment, comment_id)
+    if comment is None or comment.is_deleted or comment.tour_id != tour_id:
+        raise _api_error(status.HTTP_404_NOT_FOUND, "COMMENT_NOT_FOUND", "Comment not found.")
+
+    if current_user.id != comment.user_id and current_user.role != "admin":
+        raise _api_error(
+            status.HTTP_403_FORBIDDEN,
+            "FORBIDDEN",
+            "You do not have permission to delete this comment.",
+        )
+
+    comment.is_deleted = True
+    await db.commit()
+
