@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, func, UniqueConstraint
+from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, func, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
@@ -8,7 +8,18 @@ from app.database import Base
 
 class Purchase(Base):
     __tablename__ = "purchases"
-    __table_args__ = (UniqueConstraint("user_id", "tour_id"),)
+    __table_args__ = (
+        # Partial unique index: only one active (pending or completed) purchase
+        # per user-tour pair. Failed purchases are excluded, allowing retries
+        # without hitting a unique constraint violation.
+        Index(
+            "idx_one_active_purchase_per_user_tour",
+            "user_id",
+            "tour_id",
+            unique=True,
+            postgresql_where="status IN ('pending', 'completed')",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4

@@ -28,6 +28,27 @@ export const authApi = {
       body: { email, password, device_identifier: deviceIdentifier },
     }),
 
+  requestOtp: (email: string) =>
+    apiRequest<{ message: string; _dev_otp?: string }>('/auth/request-otp', {
+      method: 'POST',
+      auth: false,
+      body: { email },
+    }),
+
+  verifyOtp: (email: string, otp: string, deviceIdentifier: string) =>
+    apiRequest<AuthTokens>('/auth/verify-otp', {
+      method: 'POST',
+      auth: false,
+      body: { email, otp, device_identifier: deviceIdentifier },
+    }),
+
+  googleLogin: (idToken: string, deviceIdentifier: string) =>
+    apiRequest<AuthTokens>('/auth/google', {
+      method: 'POST',
+      auth: false,
+      body: { id_token: idToken, device_identifier: deviceIdentifier },
+    }),
+
   logout: () => apiRequest<void>('/auth/logout', { method: 'POST' }),
 
   me: () => apiRequest<User>('/auth/me'),
@@ -40,7 +61,10 @@ export const toursApi = {
 
   get: (tourId: string) => apiRequest<TourDetail>(`/tours/${tourId}`),
 
-  getPackage: (tourId: string) => apiRequest<TourPackage>(`/tours/${tourId}/package`),
+  getPackage: (tourId: string, deviceIdentifier: string) =>
+    apiRequest<TourPackage>(`/tours/${tourId}/package`, {
+      headers: { 'X-Device-Id': deviceIdentifier },
+    }),
 
   like: (tourId: string) => apiRequest(`/tours/${tourId}/like`, { method: 'POST' }),
   unlike: (tourId: string) => apiRequest(`/tours/${tourId}/like`, { method: 'DELETE' }),
@@ -51,6 +75,8 @@ export const toursApi = {
       method: 'POST',
       body: { comment_text: commentText },
     }),
+  deleteComment: (tourId: string, commentId: string) =>
+    apiRequest<void>(`/tours/${tourId}/comments/${commentId}`, { method: 'DELETE' }),
 };
 
 // ---- Purchases ----
@@ -64,6 +90,9 @@ export const purchasesApi = {
       method: 'POST',
       body: { device_identifier: deviceIdentifier },
     }),
+
+  refund: (purchaseId: string) =>
+    apiRequest(`/purchases/${purchaseId}/refund`, { method: 'POST' }),
 };
 
 // ---- Sessions (walks) ----

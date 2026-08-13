@@ -3,11 +3,13 @@ from sqlalchemy.orm import DeclarativeBase
 from app.config import settings
 
 
-# Async engine — used by FastAPI at runtime
+# Async engine — used by FastAPI at runtime.
+# echo=settings.DEBUG ensures SQL queries (including those touching password
+# hashes and JWTs) are never logged in production unless DEBUG=True is set.
 if settings.DATABASE_URL.startswith("sqlite"):
     engine = create_async_engine(
         settings.DATABASE_URL,
-        echo=True        # logs all SQL queries — set to False in production
+        echo=settings.DEBUG,
     )
 else:
     engine = create_async_engine(
@@ -15,7 +17,7 @@ else:
         pool_size=10,
         max_overflow=20,
         pool_pre_ping=True,
-        echo=True        # logs all SQL queries — set to False in production
+        echo=settings.DEBUG,
     )
 
 # Session factory

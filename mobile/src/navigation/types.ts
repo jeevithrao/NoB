@@ -10,5 +10,6 @@ export type AppStackParamList = {
   RouteToStart: { tourId: string };
   ActiveWalk: { tourId: string; sessionId: string };
   WalkComplete: { tourId: string; sessionId: string };
+  MapScreen: { tourId: string };
   Profile: undefined;
 };

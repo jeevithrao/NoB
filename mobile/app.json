@@ -45,7 +45,9 @@
         {
           "locationAlwaysAndWhenInUsePermission": "NoB uses your location during an active walk to trigger stop narration."
         }
-      ]
+      ],
+      "expo-status-bar",
+      "expo-audio"
     ],
     "extra": {
       "eas": {

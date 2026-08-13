@@ -1,5 +1,7 @@
 import os
+import re
 import uuid
+from pathlib import Path
 
 import aiofiles
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -130,29 +132,64 @@ async def reset_session(
     await db.commit()
 
 
+# The resolved root directory all audio uploads must live under.
+# Path.resolve() turns it absolute so the traversal check below is reliable.
+AUDIO_ROOT = Path("media/audio").resolve()
+
+# Strict allowlists for subfolder and filename — reject anything that
+# contains path separators, dots that could navigate up, etc.
+SUBFOLDER_RE = re.compile(r'^[a-z0-9-]+$')
+FILENAME_RE = re.compile(r'^[a-zA-Z0-9_-]+\.mp3$')
+
+
 @router.post("/audio/upload", status_code=status.HTTP_201_CREATED)
 async def upload_audio(
     file: UploadFile = File(...),
     subfolder: str = "general",
     _admin: User = Depends(get_current_admin),
 ):
-    """Upload an MP3 audio file for a tour stop.
-    subfolder should be the neighbourhood slug, e.g. 'malleshwaram'.
-    The filename must match exactly what's stored in the stops.audio_filename column.
-    """
-    if not (file.filename or "").lower().endswith(".mp3"):
-        raise _api_error(status.HTTP_400_BAD_REQUEST, "INVALID_FILE_TYPE", "Only .mp3 files are accepted.")
+    """Upload an MP3 narration file for a tour stop.
 
-    folder_path = os.path.join("media", "audio", subfolder)
-    os.makedirs(folder_path, exist_ok=True)
-    file_path = os.path.join(folder_path, file.filename)
+    subfolder must be the neighbourhood slug (e.g. 'malleshwaram').
+    The filename must match exactly what is stored in stops.audio_filename.
+    Both are validated against strict allow-lists to prevent path traversal.
+    """
+    # Validate subfolder — only lowercase alphanumeric and hyphens allowed
+    if not SUBFOLDER_RE.match(subfolder):
+        raise _api_error(
+            status.HTTP_400_BAD_REQUEST,
+            "INVALID_SUBFOLDER",
+            "Subfolder must contain only lowercase letters, numbers, and hyphens.",
+        )
+
+    # Strip any path components from the filename then validate the bare name
+    safe_filename = os.path.basename(file.filename or "")
+    if not FILENAME_RE.match(safe_filename):
+        raise _api_error(
+            status.HTTP_400_BAD_REQUEST,
+            "INVALID_FILENAME",
+            "Filename must match [a-zA-Z0-9_-]+.mp3 with no path separators.",
+        )
+
+    folder_path = AUDIO_ROOT / subfolder
+    folder_path.mkdir(parents=True, exist_ok=True)
+    file_path = folder_path / safe_filename
+
+    # Defense-in-depth: verify the resolved path is still inside AUDIO_ROOT
+    # even after the regex checks above (handles edge cases like symlinks).
+    if not str(file_path.resolve()).startswith(str(AUDIO_ROOT)):
+        raise _api_error(
+            status.HTTP_400_BAD_REQUEST,
+            "PATH_TRAVERSAL_DETECTED",
+            "Invalid file path.",
+        )
 
     content = await file.read()
     async with aiofiles.open(file_path, "wb") as f:
         await f.write(content)
 
     return {
-        "filename": f"{subfolder}/{file.filename}",
-        "path": file_path,
+        "filename": f"{subfolder}/{safe_filename}",
+        "path": str(file_path),
         "size_bytes": len(content),
     }

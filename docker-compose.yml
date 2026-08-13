@@ -9,8 +9,9 @@ services:
       POSTGRES_USER: ${DB_USER:-ethnowalk_user}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-ethnodb26}
       POSTGRES_DB: ${DB_NAME:-NoB_db}
-    ports:
-      - "5432:5432"
+    # Port is NOT exposed to the host \u2014 only reachable by other Docker services.
+    # To connect from the host machine for debugging, use:
+    #   docker exec -it nob_db psql -U ethnowalk_user NoB_db
     volumes:
       - nob_db_data:/var/lib/postgresql/data
     healthcheck:
@@ -43,11 +44,18 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./backend/media:/app/media:ro
+      # Mount SSL certs (provisioned externally via Let's Encrypt / certbot):
+      #   docker run --rm -v nob_certs:/etc/letsencrypt certbot/certbot certonly ...
+      # Uncomment and point to your cert paths once TLS is provisioned.
+      # - nob_certs:/etc/nginx/ssl:ro
+      - /var/www/certbot:/var/www/certbot:ro
     depends_on:
       - backend
 
 volumes:
   nob_db_data:
+  # nob_certs:

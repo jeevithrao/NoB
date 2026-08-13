@@ -1,11 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, FlatList, StyleSheet, Text, View } from 'react-native';
 import * as Location from 'expo-location';
-import { Audio } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
+import type { AudioPlayer } from 'expo-audio';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { getDownloadedTour, queueSessionEvent, getQueuedEvents, clearQueuedEvents } from '../api/offlineStorage';
+import {
+  getDownloadedTour,
+  queueSessionEvent,
+  getQueuedEvents,
+  clearQueuedEvents,
+} from '../api/offlineStorage';
 import { distanceMeters } from '../api/geo';
 import { sessionsApi } from '../api/endpoints';
 import { uuidv4 } from '../api/uuid';
@@ -23,7 +29,7 @@ export function ActiveWalkScreen({ route, navigation }: Props) {
   const [nearestDistance, setNearestDistance] = useState<number | null>(null);
   const [completing, setCompleting] = useState(false);
 
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const playerRef = useRef<AudioPlayer | null>(null);
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
   const visitedRef = useRef<Set<string>>(new Set());
 
@@ -35,33 +41,49 @@ export function ActiveWalkScreen({ route, navigation }: Props) {
       if (!downloaded) return;
       setTour(downloaded);
 
-      await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, staysActiveInBackground: true });
+      await setAudioModeAsync({
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+      });
 
       locationSubscription.current = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 5 },
         (position) => {
           if (cancelled) return;
-          handlePositionUpdate(downloaded, position.coords.latitude, position.coords.longitude);
+          handlePositionUpdate(
+            downloaded,
+            position.coords.latitude,
+            position.coords.longitude
+          );
         }
       );
     })();
 
-    // Best-effort sync of anything queued while offline — runs on mount and
-    // could also be wired to a periodic timer / app-foreground event.
     flushQueuedEvents();
 
     return () => {
       cancelled = true;
       locationSubscription.current?.remove();
-      soundRef.current?.unloadAsync();
+      playerRef.current?.release();
     };
   }, [tourId]);
 
-  async function handlePositionUpdate(downloaded: DownloadedTour, lat: number, lng: number) {
-    const nextStop = downloaded.tourPackage.stops.find((s) => !visitedRef.current.has(s.id));
+  async function handlePositionUpdate(
+    downloaded: DownloadedTour,
+    lat: number,
+    lng: number
+  ) {
+    const nextStop = downloaded.tourPackage.stops.find(
+      (s) => !visitedRef.current.has(s.id)
+    );
     if (!nextStop) return;
 
-    const distance = distanceMeters(lat, lng, parseFloat(nextStop.lat), parseFloat(nextStop.lng));
+    const distance = distanceMeters(
+      lat,
+      lng,
+      parseFloat(nextStop.lat),
+      parseFloat(nextStop.lng)
+    );
     setNearestDistance(distance);
 
     if (distance <= nextStop.trigger_radius_m) {
@@ -69,7 +91,10 @@ export function ActiveWalkScreen({ route, navigation }: Props) {
     }
   }
 
-  async function handleArrivedAtStop(downloaded: DownloadedTour, stop: StopWithAudio) {
+  async function handleArrivedAtStop(
+    downloaded: DownloadedTour,
+    stop: StopWithAudio
+  ) {
     if (visitedRef.current.has(stop.id)) return;
     visitedRef.current.add(stop.id);
     setVisitedStopIds(new Set(visitedRef.current));
@@ -85,7 +110,9 @@ export function ActiveWalkScreen({ route, navigation }: Props) {
     await playStopAudio(downloaded, stop);
     await flushQueuedEvents();
 
-    const allVisited = downloaded.tourPackage.stops.every((s) => visitedRef.current.has(s.id));
+    const allVisited = downloaded.tourPackage.stops.every((s) =>
+      visitedRef.current.has(s.id)
+    );
     if (allVisited) {
       await handleCompleteWalk();
     }
@@ -93,10 +120,12 @@ export function ActiveWalkScreen({ route, navigation }: Props) {
 
   async function playStopAudio(downloaded: DownloadedTour, stop: StopWithAudio) {
     try {
-      await soundRef.current?.unloadAsync();
+      playerRef.current?.release();
+
       const localUri = downloaded.audioLocalPaths[stop.id] || stop.audio_url;
-      const { sound } = await Audio.Sound.createAsync({ uri: localUri }, { shouldPlay: true });
-      soundRef.current = sound;
+      const player = createAudioPlayer({ uri: localUri });
+      playerRef.current = player;
+      player.play();
 
       await queueSessionEvent(sessionId, {
         client_event_id: uuidv4(),
@@ -105,8 +134,8 @@ export function ActiveWalkScreen({ route, navigation }: Props) {
         occurred_at: new Date().toISOString(),
       });
 
-      sound.setOnPlaybackStatusUpdate(async (status) => {
-        if (status.isLoaded && status.didJustFinish) {
+      player.addListener('playbackStatusUpdate', async (status) => {
+        if (status.didJustFinish) {
           await queueSessionEvent(sessionId, {
             client_event_id: uuidv4(),
             stop_id: stop.id,
@@ -117,117 +146,155 @@ export function ActiveWalkScreen({ route, navigation }: Props) {
         }
       });
     } catch {
-      // Audio playback failing shouldn't block the walk — the arrived event
-      // is already queued, so progress still advances.
+      // Audio failing should not block the walk
     }
   }
 
   async function flushQueuedEvents() {
-    const queued = await getQueuedEvents(sessionId);
+    const queued = getQueuedEvents(sessionId);
     if (queued.length === 0) return;
     try {
       await sessionsApi.submitEventsBatch(sessionId, queued);
-      await clearQueuedEvents(sessionId);
+      clearQueuedEvents(sessionId);
     } catch {
-      // Stays queued locally — next successful flush (or app foreground)
-      // will retry. client_event_id makes this safe to resend.
+      // stays queued for next flush
     }
   }
 
   async function handleCompleteWalk() {
+    if (completing) return;
     setCompleting(true);
     try {
       await flushQueuedEvents();
       await sessionsApi.complete(sessionId);
-      navigation.replace('WalkComplete', { tourId, sessionId });
-    } catch {
-      Alert.alert(
-        'Almost there',
-        "All stops are visited but we couldn't confirm completion with the server yet. " +
-          "We'll keep retrying — you can also try again from here.",
-        [{ text: 'Retry', onPress: handleCompleteWalk }]
-      );
-    } finally {
+      navigation.replace('WalkComplete', { tourId });
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Could not complete walk. Try again.');
       setCompleting(false);
     }
   }
 
-  if (!tour) return null;
+  if (!tour) {
+    return (
+      <ScreenContainer>
+        <Text style={styles.muted}>Loading walk…</Text>
+      </ScreenContainer>
+    );
+  }
+
+  const stops = tour.tourPackage.stops;
+  const remainingStops = stops.filter((s) => !visitedStopIds.has(s.id));
+  const nextStop = remainingStops[0] ?? null;
 
   return (
     <ScreenContainer>
-      <Text style={styles.title}>{tour.tourPackage.name}</Text>
-      <Text style={styles.subtitle}>
-        {visitedStopIds.size} of {tour.tourPackage.stops.length} stops visited
-      </Text>
-
+      {/* Active stop card */}
       {activeStop && (
         <View style={styles.activeCard}>
-          <Text style={styles.activeLabel}>Now playing</Text>
-          <Text style={styles.activeStopName}>{activeStop.name}</Text>
-          {activeStop.narrative_text && <Text style={styles.activeText}>{activeStop.narrative_text}</Text>}
+          <Text style={styles.activeLabel}>NOW PLAYING</Text>
+          <Text style={styles.activeName}>{activeStop.name}</Text>
+          {activeStop.narrative_text && (
+            <Text style={styles.activeNarrative}>{activeStop.narrative_text}</Text>
+          )}
         </View>
       )}
 
-      {nearestDistance !== null && visitedStopIds.size < tour.tourPackage.stops.length && (
-        <Text style={styles.distanceText}>~{Math.round(nearestDistance)} m to next stop</Text>
+      {/* Distance to next stop */}
+      {nextStop && nearestDistance !== null && (
+        <View style={styles.distanceRow}>
+          <Text style={styles.distanceLabel}>Next stop</Text>
+          <Text style={styles.distanceName}>{nextStop.name}</Text>
+          <Text style={styles.distanceValue}>
+            {nearestDistance < 1000
+              ? `${Math.round(nearestDistance)}m away`
+              : `${(nearestDistance / 1000).toFixed(1)}km away`}
+          </Text>
+        </View>
       )}
 
+      {/* Stops list */}
       <FlatList
-        data={tour.tourPackage.stops}
+        data={stops}
         keyExtractor={(s) => s.id}
-        style={{ marginTop: spacing.lg }}
-        renderItem={({ item, index }) => (
-          <View style={styles.stopRow}>
-            <Text style={[styles.stopIndex, visitedStopIds.has(item.id) && styles.stopDone]}>{index + 1}</Text>
-            <Text style={[styles.stopName, visitedStopIds.has(item.id) && styles.stopDone]}>{item.name}</Text>
-            {visitedStopIds.has(item.id) && <Text style={styles.checkmark}>\u2713</Text>}
-          </View>
-        )}
+        style={styles.list}
+        renderItem={({ item }) => {
+          const visited = visitedStopIds.has(item.id);
+          const isActive = activeStop?.id === item.id;
+          return (
+            <View style={[styles.stopRow, isActive && styles.stopRowActive]}>
+              <View
+                style={[
+                  styles.stopDot,
+                  visited && styles.stopDotVisited,
+                  isActive && styles.stopDotActive,
+                ]}
+              />
+              <Text style={[styles.stopName, visited && styles.stopNameVisited]}>
+                {item.name}
+              </Text>
+            </View>
+          );
+        }}
       />
 
-      <PrimaryButton
-        title={completing ? 'Finishing up\u2026' : 'End walk early'}
-        variant="secondary"
-        loading={completing}
-        onPress={() =>
-          Alert.alert('End walk?', 'Stops you haven\u2019t reached yet will be skipped.', [
-            { text: 'Keep walking', style: 'cancel' },
-            { text: 'End now', style: 'destructive', onPress: handleCompleteWalk },
-          ])
-        }
-        style={styles.endButton}
-      />
+      {/* Complete button — shown after last stop visited */}
+      {remainingStops.length === 0 && (
+        <PrimaryButton
+          label={completing ? 'Saving…' : 'Complete walk'}
+          onPress={handleCompleteWalk}
+          disabled={completing}
+        />
+      )}
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  title: { color: colors.text, fontSize: 20, fontWeight: '800' },
-  subtitle: { color: colors.textMuted, fontSize: 14, marginTop: spacing.xs },
+  muted: { color: colors.textMuted, fontFamily: 'SpaceMono', fontSize: 14 },
   activeCard: {
     backgroundColor: colors.surface,
     borderRadius: 14,
     padding: spacing.md,
-    marginTop: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.primary,
+    marginBottom: spacing.md,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary,
   },
-  activeLabel: { color: colors.primary, fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
-  activeStopName: { color: colors.text, fontSize: 18, fontWeight: '700', marginTop: spacing.xs },
-  activeText: { color: colors.textMuted, fontSize: 14, marginTop: spacing.sm, lineHeight: 20 },
-  distanceText: { color: colors.textMuted, fontSize: 13, marginTop: spacing.md, textAlign: 'center' },
+  activeLabel: {
+    color: colors.primary,
+    fontSize: 10,
+    letterSpacing: 2,
+    fontFamily: 'SpaceMono',
+    marginBottom: 4,
+  },
+  activeName: { color: colors.text, fontSize: 18, fontFamily: 'SpaceMono', fontWeight: '600' },
+  activeNarrative: { color: colors.textMuted, fontSize: 13, marginTop: 6, lineHeight: 20 },
+  distanceRow: {
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: 10,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  distanceLabel: { color: colors.textMuted, fontSize: 11, letterSpacing: 1 },
+  distanceName: { color: colors.text, fontSize: 15, fontWeight: '600', marginTop: 2 },
+  distanceValue: { color: colors.primary, fontSize: 22, fontWeight: '700', marginTop: 4 },
+  list: { flex: 1 },
   stopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.sm,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    gap: spacing.sm,
   },
-  stopIndex: { color: colors.textMuted, width: 20 },
-  stopName: { color: colors.text, flex: 1 },
-  stopDone: { color: colors.success },
-  checkmark: { color: colors.success, fontWeight: '700' },
-  endButton: { marginTop: spacing.md },
+  stopRowActive: { backgroundColor: colors.surface, borderRadius: 8, paddingHorizontal: 8 },
+  stopDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.border,
+    marginRight: 12,
+  },
+  stopDotVisited: { backgroundColor: colors.success },
+  stopDotActive: { backgroundColor: colors.primary },
+  stopName: { color: colors.textMuted, fontSize: 14 },
+  stopNameVisited: { color: colors.text },
 });
