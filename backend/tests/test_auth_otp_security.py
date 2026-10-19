@@ -160,6 +160,9 @@ def test_production_refuses_unsafe_config(overrides, fragment):
         SECRET_KEY="x" * 48,
         EMAIL_BACKEND="smtp",
         MOCK_PAYMENTS=False,
+        RAZORPAY_KEY_ID="rzp_live_x",
+        RAZORPAY_KEY_SECRET="s" * 20,
+        RAZORPAY_WEBHOOK_SECRET="w" * 20,
         EXPOSE_DEV_OTP=False,
         DEBUG=False,
     )
@@ -188,3 +191,14 @@ async def test_email_matching_is_case_insensitive(client):
         json={"email": "MIXEDCASE@nobtests.com", "password": "correct-horse-1", "device_identifier": "d"},
     )
     assert dup.status_code == 409
+
+
+def test_real_payments_require_razorpay_keys_in_every_environment():
+    base = dict(
+        DATABASE_URL="postgresql+asyncpg://u:p@h/db",
+        DATABASE_URL_SYNC="postgresql://u:p@h/db",
+        SECRET_KEY="x" * 48,
+        MOCK_PAYMENTS=False,
+    )
+    with pytest.raises(ValueError, match="RAZORPAY"):
+        Settings(_env_file=None, ENVIRONMENT="development", **base)
