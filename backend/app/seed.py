@@ -5,7 +5,9 @@ Safe to re-run — skips creation if the admin user / tours already exist.
 
 import asyncio
 import copy
+import secrets
 
+from app.config import settings
 from app.core.security import hash_password
 from app.database import AsyncSessionLocal
 from app.models import Stop, Tour, User
@@ -13,9 +15,7 @@ from app.seed_data import TOURS
 from sqlalchemy import select
 
 
-ADMIN_EMAIL = "admin@nob.app"
-ADMIN_PASSWORD = "AdminPass123!"
-
+ADMIN_EMAIL = settings.ADMIN_EMAIL.strip().lower()
 
 
 async def seed() -> None:
@@ -23,14 +23,20 @@ async def seed() -> None:
         result = await db.execute(select(User).where(User.email == ADMIN_EMAIL))
         admin = result.scalar_one_or_none()
         if admin is None:
+            # Never ship a known default: use ADMIN_PASSWORD from the environment,
+            # or generate a one-off random password and show it exactly once.
+            password = settings.ADMIN_PASSWORD or secrets.token_urlsafe(16)
             admin = User(
                 email=ADMIN_EMAIL,
-                password_hash=hash_password(ADMIN_PASSWORD),
+                password_hash=hash_password(password),
                 full_name="NoB Admin",
                 role="admin",
             )
             db.add(admin)
-            print(f"Created admin user: {ADMIN_EMAIL} / {ADMIN_PASSWORD}")
+            if settings.ADMIN_PASSWORD:
+                print(f"Created admin user: {ADMIN_EMAIL} (password from ADMIN_PASSWORD)")
+            else:
+                print(f"Created admin user: {ADMIN_EMAIL}\n  generated password (shown once): {password}")
         else:
             print(f"Admin user already exists: {ADMIN_EMAIL}")
 
