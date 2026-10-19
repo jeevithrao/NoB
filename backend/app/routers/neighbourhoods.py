@@ -72,7 +72,8 @@ async def get_neighbourhood(
         )
     ).scalars().unique().all()
 
-    detail = NeighbourhoodDetail.model_validate(hood)
-    detail.tour_count = len(tours)
-    detail.tours = await to_list_items(db, current_user, tours)
-    return detail
+    # Build from the plain columns: validating the ORM object directly would try
+    # to lazy-load `hood.tours` (not allowed in async code).
+    base = NeighbourhoodOut.model_validate(hood).model_dump()
+    base["tour_count"] = len(tours)
+    return NeighbourhoodDetail(**base, tours=await to_list_items(db, current_user, tours))
