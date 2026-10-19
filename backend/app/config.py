@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_ID: str | None = None
     RAZORPAY_KEY_SECRET: str | None = None
     RAZORPAY_WEBHOOK_SECRET: str | None = None
+    RAZORPAY_API_BASE: str = "https://api.razorpay.com/v1"
+    PAYMENT_CURRENCY: str = "INR"
+    PAYMENT_MERCHANT_NAME: str = "Neighbourhoods of Bangalore"
     GOOGLE_CLIENT_ID: str | None = None
 
     # Signed URL expiry for tour audio package downloads (seconds)
@@ -90,6 +93,12 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_for_environment(self) -> "Settings":
+        if not self.MOCK_PAYMENTS and not (
+            self.RAZORPAY_KEY_ID and self.RAZORPAY_KEY_SECRET and self.RAZORPAY_WEBHOOK_SECRET
+        ):
+            raise ValueError(
+                "MOCK_PAYMENTS=false requires RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET and RAZORPAY_WEBHOOK_SECRET"
+            )
         if self.ENVIRONMENT == "development":
             return self
         problems: list[str] = []
