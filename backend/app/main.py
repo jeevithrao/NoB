@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.routers import admin, auth, media, purchases, sessions, social, tours
+from app.routers import admin, auth, media, neighbourhoods, purchases, sessions, social, tours
 
 app = FastAPI(
     title="NoB \u2014 Neighbourhoods of Bengaluru",
@@ -39,6 +39,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 app.include_router(auth.router)
 app.include_router(tours.router)
+app.include_router(neighbourhoods.router)
 app.include_router(purchases.router)
 app.include_router(sessions.router)
 app.include_router(social.router)

@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_admin
-from app.models import Purchase, Stop, Tour, TourSession, User
+from app.models import Neighbourhood, Purchase, Stop, Tour, TourSession, User
+from app.schemas.neighbourhood import NeighbourhoodCreate, NeighbourhoodOut, NeighbourhoodUpdate
 from app.schemas.purchase import PurchaseOut
 from app.schemas.tour import StopCreate, StopOut, TourCreate, TourDetail, TourUpdate
 
@@ -21,10 +22,54 @@ def _api_error(status_code: int, code: str, message: str) -> HTTPException:
     return HTTPException(status_code=status_code, detail={"error": {"code": code, "message": message}})
 
 
+async def _require_neighbourhood(db: AsyncSession, hood_id: uuid.UUID | None) -> None:
+    if hood_id is not None and await db.get(Neighbourhood, hood_id) is None:
+        raise _api_error(status.HTTP_404_NOT_FOUND, "NEIGHBOURHOOD_NOT_FOUND", "Neighbourhood not found.")
+
+
+def _slugify(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "area"
+
+
+@router.post("/neighbourhoods", response_model=NeighbourhoodOut, status_code=status.HTTP_201_CREATED)
+async def create_neighbourhood(
+    body: NeighbourhoodCreate, db: AsyncSession = Depends(get_db), _admin: User = Depends(get_current_admin)
+):
+    slug = body.slug or _slugify(body.name)
+    clash = await db.execute(
+        select(Neighbourhood.id).where((Neighbourhood.slug == slug) | ((Neighbourhood.name == body.name) & (Neighbourhood.city == body.city)))
+    )
+    if clash.first() is not None:
+        raise _api_error(status.HTTP_409_CONFLICT, "NEIGHBOURHOOD_EXISTS", "A neighbourhood with this name or slug already exists.")
+    hood = Neighbourhood(**body.model_dump(exclude={"slug"}), slug=slug)
+    db.add(hood)
+    await db.commit()
+    await db.refresh(hood)
+    return NeighbourhoodOut.model_validate(hood)
+
+
+@router.put("/neighbourhoods/{hood_id}", response_model=NeighbourhoodOut)
+async def update_neighbourhood(
+    hood_id: uuid.UUID,
+    body: NeighbourhoodUpdate,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(get_current_admin),
+):
+    hood = await db.get(Neighbourhood, hood_id)
+    if hood is None:
+        raise _api_error(status.HTTP_404_NOT_FOUND, "NEIGHBOURHOOD_NOT_FOUND", "Neighbourhood not found.")
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(hood, field, value)
+    await db.commit()
+    await db.refresh(hood)
+    return NeighbourhoodOut.model_validate(hood)
+
+
 @router.post("/tours", response_model=TourDetail, status_code=status.HTTP_201_CREATED)
 async def create_tour(
     body: TourCreate, db: AsyncSession = Depends(get_db), _admin: User = Depends(get_current_admin)
 ):
+    await _require_neighbourhood(db, body.neighbourhood_id)
     tour = Tour(**body.model_dump())
     db.add(tour)
     await db.commit()
@@ -45,7 +90,9 @@ async def update_tour(
     if tour is None:
         raise _api_error(status.HTTP_404_NOT_FOUND, "TOUR_NOT_FOUND", "Tour not found.")
 
-    for field, value in body.model_dump(exclude_unset=True).items():
+    changes = body.model_dump(exclude_unset=True)
+    await _require_neighbourhood(db, changes.get("neighbourhood_id"))
+    for field, value in changes.items():
         setattr(tour, field, value)
 
     await db.commit()

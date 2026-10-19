@@ -2,19 +2,23 @@ import hashlib
 import json
 import logging
 import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import PaymentEvent, Purchase, Tour, TourSession, User
+from app.models import PaymentEvent, Purchase, Stop, Tour, TourSession, User
 from app.routers.tours import _BOUND_TO_OTHER_DEVICE_MSG
 from app.schemas.purchase import (
     BindDeviceRequest,
+    BookingOut,
+    BookingTour,
     CheckoutVerifyRequest,
     PurchaseCreate,
     PurchaseCreateResponse,
@@ -114,6 +118,97 @@ async def _owned_purchase(db: AsyncSession, purchase_id: uuid.UUID, user: User, 
     return purchase
 
 
+def _refund_deadline(purchase: Purchase) -> datetime:
+    return purchase.created_at + timedelta(days=settings.REFUND_WINDOW_DAYS)
+
+
+def _refund_block_reason(purchase: Purchase, sessions: list[TourSession], now: datetime) -> str | None:
+    """None if refundable, else the error code. Rules: Business Rules section 4."""
+    if purchase.status != "completed":
+        return "PURCHASE_NOT_COMPLETED"
+    if purchase.is_locked or any(s.completed for s in sessions) or any(s.stops_visited > 0 for s in sessions):
+        return "REFUND_NOT_ELIGIBLE"  # the walk was started or delivered
+    if now > _refund_deadline(purchase):
+        return "REFUND_WINDOW_EXPIRED"
+    return None
+
+
+@router.get("/purchases", response_model=list[BookingOut])
+async def list_my_purchases(
+    tab: Literal["upcoming", "past", "all"] = Query(default="all"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """"My Bookings". upcoming = bought and not yet finished (not started or in
+    progress); past = finished walks and refunded purchases. Pending/failed
+    attempts are not bookings and never appear."""
+    purchases = (
+        await db.execute(
+            select(Purchase)
+            .where(Purchase.user_id == current_user.id, Purchase.status.in_(["completed", "refunded"]))
+            .order_by(Purchase.created_at.desc(), Purchase.id)
+        )
+    ).scalars().all()
+    if not purchases:
+        return []
+
+    tour_ids = {p.tour_id for p in purchases}
+    tours = {
+        t.id: t
+        for t in (await db.execute(select(Tour).where(Tour.id.in_(tour_ids)))).scalars().unique().all()
+    }
+    stop_counts = {
+        row[0]: row[1]
+        for row in (
+            await db.execute(
+                select(Stop.tour_id, func.count(Stop.id)).where(Stop.tour_id.in_(tour_ids)).group_by(Stop.tour_id)
+            )
+        ).all()
+    }
+    sessions_by_tour: dict[uuid.UUID, list[TourSession]] = {}
+    for sess in (
+        await db.execute(
+            select(TourSession)
+            .where(TourSession.user_id == current_user.id, TourSession.tour_id.in_(tour_ids))
+            .order_by(TourSession.started_at.desc())
+        )
+    ).scalars():
+        sessions_by_tour.setdefault(sess.tour_id, []).append(sess)
+
+    now = datetime.now(timezone.utc)
+    out: list[BookingOut] = []
+    for purchase in purchases:
+        sessions = sessions_by_tour.get(purchase.tour_id, [])
+        latest = sessions[0] if sessions else None
+        if latest is None:
+            walk = "not_started"
+        elif latest.completed:
+            walk = "completed"
+        else:
+            walk = "in_progress"
+        is_past = purchase.status == "refunded" or walk == "completed"
+        if (tab == "upcoming" and is_past) or (tab == "past" and not is_past):
+            continue
+        refundable = _refund_block_reason(purchase, sessions, now) is None
+        out.append(
+            BookingOut(
+                purchase_id=purchase.id,
+                status=purchase.status,
+                amount_paise=purchase.amount_paise,
+                purchased_at=purchase.created_at,
+                tour=BookingTour.model_validate(tours[purchase.tour_id]),
+                walk_status=walk,
+                stops_visited=latest.stops_visited if latest else 0,
+                stop_count=stop_counts.get(purchase.tour_id, 0),
+                session_id=latest.id if latest and not latest.completed else None,
+                device_bound=purchase.device_id is not None,
+                can_refund=refundable,
+                refund_deadline=_refund_deadline(purchase) if refundable else None,
+            )
+        )
+    return out
+
+
 @router.get("/purchases/{purchase_id}", response_model=PurchaseOut)
 async def get_purchase(
     purchase_id: uuid.UUID,
@@ -196,41 +291,49 @@ async def refund_purchase(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Process a refund request for a completed purchase.
+    """Full refund, only while the walk has never been started and the purchase
+    is within REFUND_WINDOW_DAYS (default 14).
 
-    Business Rules (Phase 3 Task 5):
-    - If stops_visited == 0 (walk not started) → set status = 'refunded', unlock, return 200
-    - If stops_visited > 0 (walk started) → raise 409 REFUND_NOT_ELIGIBLE
+      - not found / not yours ... 404
+      - not a completed purchase . 400 PURCHASE_NOT_COMPLETED
+      - any stop visited, or walk completed ... 409 REFUND_NOT_ELIGIBLE
+      - older than the window ... 409 REFUND_WINDOW_EXPIRED
+      - gateway failure ......... 502 GATEWAY_ERROR (nothing is changed; safe to retry)
     """
-    purchase = await db.get(Purchase, purchase_id)
-    if purchase is None or purchase.user_id != current_user.id:
-        raise _api_error(status.HTTP_404_NOT_FOUND, "PURCHASE_NOT_FOUND", "Purchase not found.")
+    purchase = await _owned_purchase(db, purchase_id, current_user, lock=True)
+    sessions = (
+        await db.execute(
+            select(TourSession).where(
+                TourSession.user_id == current_user.id, TourSession.tour_id == purchase.tour_id
+            )
+        )
+    ).scalars().all()
 
-    if purchase.status != "completed":
-        raise _api_error(status.HTTP_400_BAD_REQUEST, "PURCHASE_NOT_COMPLETED", "Only completed purchases can be refunded.")
-
-    # Check walk progress from the user's latest session for this tour
-    session_result = await db.execute(
-        select(TourSession)
-        .where(TourSession.user_id == current_user.id, TourSession.tour_id == purchase.tour_id)
-        .order_by(TourSession.started_at.desc())
-    )
-    session = session_result.scalars().first()
-
-    if session is not None and session.stops_visited > 0:
+    reason = _refund_block_reason(purchase, list(sessions), datetime.now(timezone.utc))
+    if reason == "PURCHASE_NOT_COMPLETED":
+        raise _api_error(status.HTTP_400_BAD_REQUEST, reason, "Only completed purchases can be refunded.")
+    if reason == "REFUND_NOT_ELIGIBLE":
+        raise _api_error(status.HTTP_409_CONFLICT, reason, "Refund refused: the walk has already been started.")
+    if reason == "REFUND_WINDOW_EXPIRED":
         raise _api_error(
             status.HTTP_409_CONFLICT,
-            "REFUND_NOT_ELIGIBLE",
-            "Refund refused: walk already started.",
+            reason,
+            f"Refunds are only available within {settings.REFUND_WINDOW_DAYS} days of purchase.",
         )
+
+    if not settings.MOCK_PAYMENTS and purchase.gateway_payment_id:
+        try:
+            await payments.refund_payment(purchase.gateway_payment_id, purchase.amount_paise)
+        except payments.GatewayError as exc:
+            raise _api_error(status.HTTP_502_BAD_GATEWAY, "GATEWAY_ERROR", str(exc))
 
     purchase.status = "refunded"
     purchase.is_locked = False
     purchase.locked_at = None
+    purchase.device_id = None  # the licence is gone, so is the device binding
     await db.commit()
     await db.refresh(purchase)
     return purchase
-
 
 
 _SUCCESS_EVENTS = {"payment.captured", "order.paid"}

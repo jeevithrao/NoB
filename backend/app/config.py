@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     # response. Ignored (and rejected at startup) outside development.
     EXPOSE_DEV_OTP: bool = False
 
+    # Refund policy: full refund only if the walk never started AND within this many days of purchase.
+    REFUND_WINDOW_DAYS: int = 14
+
     # Rate limits (per client IP and per account, sliding 60s window).
     # In-memory, so counts are per-process; fine for a single API container.
     RATE_LIMIT_AUTH_PER_MINUTE: int = 10

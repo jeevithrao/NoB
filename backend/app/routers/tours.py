@@ -1,15 +1,16 @@
 import uuid
-from datetime import timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user, get_current_user_optional
-from app.models import Purchase, Stop, Tour, TourLike, TourSession, User
+from app.models import Neighbourhood, Purchase, Stop, Tour, TourLike, TourSession, User
 from app.schemas.tour import StopWithAudio, TourDetail, TourListItem, TourPackage
+from app.services.catalog import to_list_items
 
 router = APIRouter(prefix="/tours", tags=["tours"])
 
@@ -61,81 +62,84 @@ async def _like_count(db: AsyncSession, tour_id: uuid.UUID) -> int:
     return result.scalar_one()
 
 
+SortKey = Literal["newest", "price_asc", "price_desc", "duration", "popular"]
+
+
+def _escape_like(term: str) -> str:
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 @router.get("", response_model=list[TourListItem])
 async def list_tours(
     city: str = Query(default="Bangalore"),
+    q: str | None = Query(default=None, max_length=100, description="Search name, description, neighbourhood"),
+    neighbourhood: str | None = Query(default=None, description="Neighbourhood slug or id"),
+    free: bool | None = Query(default=None, description="true = only free tours, false = only paid"),
+    min_price: int | None = Query(default=None, ge=0, description="paise"),
+    max_price: int | None = Query(default=None, ge=0, description="paise"),
+    sort: SortKey = Query(default="newest"),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
 ):
+    stmt = select(Tour).where(Tour.city == city, Tour.is_published.is_(True))
+
+    if q and q.strip():
+        like = f"%{_escape_like(q.strip())}%"
+        stmt = stmt.where(
+            or_(
+                Tour.name.ilike(like, escape="\\"),
+                Tour.description.ilike(like, escape="\\"),
+                Tour.neighbourhood.has(Neighbourhood.name.ilike(like, escape="\\")),
+            )
+        )
+    if neighbourhood:
+        try:
+            stmt = stmt.where(Tour.neighbourhood_id == uuid.UUID(neighbourhood))
+        except ValueError:
+            stmt = stmt.where(Tour.neighbourhood.has(Neighbourhood.slug == neighbourhood))
+    if free is True:
+        stmt = stmt.where(Tour.is_free.is_(True))
+    elif free is False:
+        stmt = stmt.where(Tour.is_free.is_(False))
+    if min_price is not None:
+        stmt = stmt.where(Tour.price_paise >= min_price)
+    if max_price is not None:
+        stmt = stmt.where(Tour.price_paise <= max_price)
+
+    if sort == "price_asc":
+        order = [Tour.price_paise.asc()]
+    elif sort == "price_desc":
+        order = [Tour.price_paise.desc()]
+    elif sort == "duration":
+        order = [Tour.duration_min.asc().nulls_last()]
+    elif sort == "popular":
+        likes = select(func.count()).where(TourLike.tour_id == Tour.id).correlate(Tour).scalar_subquery()
+        order = [likes.desc()]
+    else:
+        order = [Tour.created_at.desc()]
+    stmt = stmt.order_by(*order, Tour.id).limit(limit).offset(offset)
+
+    tours = (await db.execute(stmt)).scalars().unique().all()
+    return await to_list_items(db, current_user, tours)
+
+
+@router.get("/featured", response_model=list[TourListItem])
+async def featured_tours(
+    city: str = Query(default="Bangalore"),
+    limit: int = Query(default=10, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
+):
+    """The "Featured walks" carousel on Explore."""
     result = await db.execute(
-        select(Tour).where(Tour.city == city, Tour.is_published.is_(True)).order_by(Tour.created_at.desc())
+        select(Tour)
+        .where(Tour.city == city, Tour.is_published.is_(True), Tour.is_featured.is_(True))
+        .order_by(Tour.created_at.desc(), Tour.id)
+        .limit(limit)
     )
-    tours = result.scalars().all()
-    if not tours:
-        return []
-
-    tour_ids = [t.id for t in tours]
-
-    # Batch query like counts across all returned tours (O(1) database queries)
-    likes_result = await db.execute(
-        select(TourLike.tour_id, func.count(TourLike.user_id))
-        .where(TourLike.tour_id.in_(tour_ids))
-        .group_by(TourLike.tour_id)
-    )
-    like_counts = {row[0]: row[1] for row in likes_result.all()}
-
-    # Batch query user purchases and sessions if logged in
-    purchased_tour_ids = set()
-    latest_sessions = {}
-    if current_user is not None:
-        purchases_result = await db.execute(
-            select(Purchase.tour_id).where(
-                Purchase.user_id == current_user.id,
-                Purchase.tour_id.in_(tour_ids),
-                Purchase.status == "completed",
-            )
-        )
-        purchased_tour_ids = set(purchases_result.scalars().all())
-
-        sessions_result = await db.execute(
-            select(TourSession)
-            .where(
-                TourSession.user_id == current_user.id,
-                TourSession.tour_id.in_(tour_ids),
-            )
-            .order_by(TourSession.started_at.desc())
-        )
-        for sess in sessions_result.scalars().all():
-            if sess.tour_id not in latest_sessions:
-                latest_sessions[sess.tour_id] = sess
-
-    items = []
-    for tour in tours:
-        if not tour.is_free:
-            if current_user is None or tour.id not in purchased_tour_ids:
-                status_ = "not_purchased"
-            else:
-                sess = latest_sessions.get(tour.id)
-                if sess is None:
-                    status_ = "purchased"
-                else:
-                    status_ = "completed_locked" if sess.completed else "in_progress"
-        else:
-            if current_user is None:
-                status_ = "purchased"
-            else:
-                sess = latest_sessions.get(tour.id)
-                if sess is None:
-                    status_ = "purchased"
-                else:
-                    status_ = "completed_locked" if sess.completed else "in_progress"
-
-        item = TourListItem.model_validate(tour)
-        item.status = status_
-        item.like_count = like_counts.get(tour.id, 0)
-        items.append(item)
-    return items
-
+    return await to_list_items(db, current_user, result.scalars().unique().all())
 
 
 @router.get("/{tour_id}", response_model=TourDetail)
@@ -156,6 +160,8 @@ async def get_tour(
     detail.status = status_
     detail.like_count = like_count
     detail.stop_count = stop_count_result.scalar_one()
+    if tour.preview_audio_filename:
+        detail.preview_audio_url = _signed_audio_url(tour.preview_audio_filename)
 
     if current_user is not None and not tour.is_free:
         purchase_result = await db.execute(
