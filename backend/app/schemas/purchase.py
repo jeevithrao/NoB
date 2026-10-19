@@ -25,21 +25,18 @@ class PurchaseCreateResponse(BaseModel):
     status: str
     gateway_order_id: str | None
     gateway_config: dict
-    """gateway_config is a placeholder blob the client hands to the Razorpay/
-    Stripe SDK. While MOCK_PAYMENTS=True it's empty and the purchase completes
-    immediately server-side instead."""
+    """gateway_config is what the client hands to the Razorpay Checkout SDK
+    (key_id, order_id, amount, currency, name). While MOCK_PAYMENTS=true it is
+    {"mock": true} and the purchase is already completed."""
 
 
 class BindDeviceRequest(BaseModel):
     device_identifier: str
 
 
-class PaymentWebhookPayload(BaseModel):
-    """Shape of what a real gateway would POST. Kept intentionally loose since
-    the real provider isn't wired up yet — validated more strictly once a
-    provider is chosen."""
+class CheckoutVerifyRequest(BaseModel):
+    """The three values Razorpay Checkout hands back to the app on success."""
 
-    gateway_order_id: str
-    gateway_payment_id: str
-    status: str
-    signature: str | None = None
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str

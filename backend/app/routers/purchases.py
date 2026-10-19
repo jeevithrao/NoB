@@ -1,28 +1,44 @@
+import hashlib
+import json
+import logging
 import uuid
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import Purchase, Tour, TourSession, User
+from app.models import PaymentEvent, Purchase, Tour, TourSession, User
 from app.routers.tours import _BOUND_TO_OTHER_DEVICE_MSG
 from app.schemas.purchase import (
     BindDeviceRequest,
-    PaymentWebhookPayload,
+    CheckoutVerifyRequest,
     PurchaseCreate,
     PurchaseCreateResponse,
     PurchaseOut,
 )
+from app.services import payments
 
 router = APIRouter(tags=["purchases"])
+logger = logging.getLogger("nob.purchases")
 
 
 def _api_error(status_code: int, code: str, message: str) -> HTTPException:
     return HTTPException(status_code=status_code, detail={"error": {"code": code, "message": message}})
+
+
+async def _active_purchase(db: AsyncSession, user_id: uuid.UUID, tour_id: uuid.UUID) -> Purchase | None:
+    result = await db.execute(
+        select(Purchase).where(
+            Purchase.user_id == user_id,
+            Purchase.tour_id == tour_id,
+            Purchase.status.in_(["pending", "completed"]),
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 @router.post("/purchases", response_model=PurchaseCreateResponse, status_code=status.HTTP_201_CREATED)
@@ -37,39 +53,31 @@ async def create_purchase(
     if tour.is_free:
         raise _api_error(status.HTTP_400_BAD_REQUEST, "TOUR_IS_FREE", "This tour doesn't require purchase.")
 
-    # Query only for pending or completed rows — the partial index means failed
-    # purchases are excluded, so a retry after failure creates a fresh row.
-    existing_result = await db.execute(
-        select(Purchase).where(
-            Purchase.user_id == current_user.id,
-            Purchase.tour_id == tour.id,
-            Purchase.status.in_(["pending", "completed"]),
-        )
-    )
-    purchase = existing_result.scalar_one_or_none()
-
+    # failed/refunded rows are outside the partial unique index, so a retry or
+    # re-buy creates a fresh row.
+    purchase = await _active_purchase(db, current_user.id, tour.id)
     if purchase is not None and purchase.status == "completed":
         raise _api_error(status.HTTP_409_CONFLICT, "TOUR_ALREADY_OWNED", "You already own this tour.")
 
-    if purchase is not None and purchase.status == "pending":
-        # Reuse the pending row rather than creating a duplicate order.
-        pass
-    else:
-        # status is failed or no row exists — create a fresh row with a new id
-        purchase = Purchase(
-            user_id=current_user.id,
-            tour_id=tour.id,
-            amount_paise=tour.price_paise,
-            status="pending",
-        )
-        db.add(purchase)
-        await db.flush()
+    if purchase is None:
+        try:
+            async with db.begin_nested():  # savepoint: a lost race must not poison the request
+                purchase = Purchase(
+                    user_id=current_user.id, tour_id=tour.id, amount_paise=tour.price_paise, status="pending"
+                )
+                db.add(purchase)
+                await db.flush()
+        except IntegrityError:
+            # Two requests raced; the other one created the row. Reuse it.
+            purchase = await _active_purchase(db, current_user.id, tour.id)
+            if purchase is None:
+                raise
+            if purchase.status == "completed":
+                raise _api_error(status.HTTP_409_CONFLICT, "TOUR_ALREADY_OWNED", "You already own this tour.")
 
     if settings.MOCK_PAYMENTS:
-        # No real gateway configured yet — complete the purchase immediately
-        # so the rest of the flow (download, walk, licensing) is buildable
-        # and testable today. Swap this block for real order creation once
-        # Razorpay/Stripe keys exist; the response shape won't need to change.
+        # Development only: complete instantly so the whole flow is testable
+        # without a gateway. (Production refuses to start with this on.)
         purchase.gateway_order_id = purchase.gateway_order_id or f"mock_order_{uuid.uuid4().hex[:16]}"
         purchase.gateway_payment_id = f"mock_payment_{uuid.uuid4().hex[:16]}"
         purchase.status = "completed"
@@ -81,13 +89,29 @@ async def create_purchase(
             gateway_config={"mock": True},
         )
 
-    # Real-gateway path (not wired up yet): create an order with the provider
-    # here, store gateway_order_id, and return client config for its SDK.
-    raise _api_error(
-        status.HTTP_501_NOT_IMPLEMENTED,
-        "GATEWAY_NOT_CONFIGURED",
-        "Real payment gateway isn't configured yet. Set MOCK_PAYMENTS=True for now.",
+    # Real gateway. Re-use the pending order if the user taps "Pay" twice.
+    if purchase.gateway_order_id is None:
+        try:
+            purchase.gateway_order_id = await payments.create_order(purchase)
+        except payments.GatewayError as exc:
+            raise _api_error(status.HTTP_502_BAD_GATEWAY, "GATEWAY_ERROR", str(exc))
+    await db.commit()
+    return PurchaseCreateResponse(
+        purchase_id=purchase.id,
+        status=purchase.status,
+        gateway_order_id=purchase.gateway_order_id,
+        gateway_config=payments.checkout_config(purchase),
     )
+
+
+async def _owned_purchase(db: AsyncSession, purchase_id: uuid.UUID, user: User, *, lock: bool = False) -> Purchase:
+    query = select(Purchase).where(Purchase.id == purchase_id, Purchase.user_id == user.id)
+    if lock:
+        query = query.with_for_update()
+    purchase = (await db.execute(query)).scalar_one_or_none()
+    if purchase is None:
+        raise _api_error(status.HTTP_404_NOT_FOUND, "PURCHASE_NOT_FOUND", "Purchase not found.")
+    return purchase
 
 
 @router.get("/purchases/{purchase_id}", response_model=PurchaseOut)
@@ -96,9 +120,44 @@ async def get_purchase(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    purchase = await db.get(Purchase, purchase_id)
-    if purchase is None or purchase.user_id != current_user.id:
-        raise _api_error(status.HTTP_404_NOT_FOUND, "PURCHASE_NOT_FOUND", "Purchase not found.")
+    """Current status. If a real payment is still pending, ask the gateway
+    directly, so a delayed or lost webhook never strands a paying user
+    (Feature Spec 1: manual "check payment status" fallback)."""
+    purchase = await _owned_purchase(db, purchase_id, current_user, lock=True)
+    if not settings.MOCK_PAYMENTS and purchase.status == "pending" and purchase.gateway_order_id:
+        try:
+            captured = await payments.fetch_captured_payment(purchase.gateway_order_id)
+        except payments.GatewayError:
+            captured = None  # gateway unreachable: report what we know
+        if captured:
+            await payments.apply_payment_result(
+                db, purchase, payment_id=captured["id"], succeeded=True, amount_paise=captured.get("amount")
+            )
+            await db.commit()
+            await db.refresh(purchase)
+    return purchase
+
+
+@router.post("/purchases/{purchase_id}/verify", response_model=PurchaseOut)
+async def verify_checkout(
+    purchase_id: uuid.UUID,
+    body: CheckoutVerifyRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Called by the app right after Razorpay Checkout succeeds, with the three
+    values the SDK returns. The signature proves the payment, so the user gets
+    instant confirmation; the webhook later is a harmless no-op."""
+    purchase = await _owned_purchase(db, purchase_id, current_user, lock=True)
+    if settings.MOCK_PAYMENTS:
+        raise _api_error(status.HTTP_400_BAD_REQUEST, "MOCK_MODE_ACTIVE", "Not used while MOCK_PAYMENTS=true.")
+    if purchase.gateway_order_id != body.razorpay_order_id or not payments.verify_checkout_signature(
+        body.razorpay_order_id, body.razorpay_payment_id, body.razorpay_signature
+    ):
+        raise _api_error(status.HTTP_400_BAD_REQUEST, "INVALID_SIGNATURE", "Payment signature is invalid.")
+    await payments.apply_payment_result(db, purchase, payment_id=body.razorpay_payment_id, succeeded=True)
+    await db.commit()
+    await db.refresh(purchase)
     return purchase
 
 
@@ -174,22 +233,65 @@ async def refund_purchase(
 
 
 
+_SUCCESS_EVENTS = {"payment.captured", "order.paid"}
+_FAILURE_EVENTS = {"payment.failed"}
+
+
 @router.post("/webhooks/payment", status_code=status.HTTP_204_NO_CONTENT)
-async def payment_webhook(payload: PaymentWebhookPayload, request: Request, db: AsyncSession = Depends(get_db)):
-    """Gateway -> server callback. Real implementation must verify the
-    provider's signature header before trusting this payload — stubbed here
-    since MOCK_PAYMENTS completes purchases synchronously and doesn't call
-    this at all. Left in place for when a real gateway is wired up."""
+async def payment_webhook(request: Request, db: AsyncSession = Depends(get_db)):
+    """Razorpay -> server. Never trusts an unsigned request; idempotent.
+
+      - bad/missing signature ... 401 (nothing is read or stored)
+      - already-seen event id ... 204 (replay is a no-op)
+      - unknown order/event ..... 204 (so the gateway doesn't retry forever)
+    """
     if settings.MOCK_PAYMENTS:
-        raise _api_error(
-            status.HTTP_400_BAD_REQUEST, "MOCK_MODE_ACTIVE", "Webhooks are unused while MOCK_PAYMENTS=True."
-        )
+        raise _api_error(status.HTTP_400_BAD_REQUEST, "MOCK_MODE_ACTIVE", "Webhooks are unused while MOCK_PAYMENTS=true.")
 
-    result = await db.execute(select(Purchase).where(Purchase.gateway_order_id == payload.gateway_order_id))
-    purchase = result.scalar_one_or_none()
-    if purchase is None:
-        raise _api_error(status.HTTP_404_NOT_FOUND, "PURCHASE_NOT_FOUND", "No matching purchase for this order.")
+    raw = await request.body()
+    if not payments.verify_webhook_signature(raw, request.headers.get("X-Razorpay-Signature")):
+        raise _api_error(status.HTTP_401_UNAUTHORIZED, "INVALID_SIGNATURE", "Webhook signature is invalid.")
 
-    purchase.gateway_payment_id = payload.gateway_payment_id
-    purchase.status = "completed" if payload.status == "success" else "failed"
+    try:
+        payload = json.loads(raw)
+        event_type = payload["event"]
+    except (ValueError, KeyError, TypeError):
+        raise _api_error(status.HTTP_400_BAD_REQUEST, "INVALID_PAYLOAD", "Malformed webhook payload.")
+
+    entities = (payload.get("payload") or {})
+    payment = ((entities.get("payment") or {}).get("entity")) or {}
+    order = ((entities.get("order") or {}).get("entity")) or {}
+    order_id = payment.get("order_id") or order.get("id")
+    payment_id = payment.get("id")
+    amount = payment.get("amount")
+    event_id = request.headers.get("X-Razorpay-Event-Id") or hashlib.sha256(raw).hexdigest()
+
+    event = PaymentEvent(
+        event_id=event_id,
+        event_type=event_type,
+        gateway_order_id=order_id,
+        gateway_payment_id=payment_id,
+        payload=payload,
+    )
+    try:
+        async with db.begin_nested():
+            db.add(event)
+            await db.flush()
+    except IntegrityError:
+        return  # replay of a delivery we already processed
+
+    outcome = "ignored"
+    if order_id and event_type in (_SUCCESS_EVENTS | _FAILURE_EVENTS):
+        purchase = (
+            await db.execute(select(Purchase).where(Purchase.gateway_order_id == order_id).with_for_update())
+        ).scalar_one_or_none()
+        if purchase is None:
+            outcome = "unknown_order"
+        elif not payment_id:
+            outcome = "ignored"
+        else:
+            outcome = await payments.apply_payment_result(
+                db, purchase, payment_id=payment_id, succeeded=event_type in _SUCCESS_EVENTS, amount_paise=amount
+            )
+    event.outcome = outcome
     await db.commit()
