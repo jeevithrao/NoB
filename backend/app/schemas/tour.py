@@ -29,6 +29,8 @@ class TourListItem(ORMBase):
     is_featured: bool = False
     status: TourStatus = "not_purchased"
     like_count: int = 0
+    avg_rating: float | None = None
+    rating_count: int = 0
 
 
 class TourDetail(TourListItem):
@@ -40,6 +42,8 @@ class TourDetail(TourListItem):
     languages: list[str] = []
     # Short promotional sample (time-limited signed URL); visible before purchase.
     preview_audio_url: str | None = None
+    my_rating: int | None = None
+    liked_by_me: bool = False
 
 
 class StopOut(ORMBase):

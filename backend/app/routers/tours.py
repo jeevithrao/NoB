@@ -8,9 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user, get_current_user_optional
-from app.models import Neighbourhood, Purchase, Stop, Tour, TourLike, TourSession, User
+from app.models import Neighbourhood, Purchase, Stop, Tour, TourLike, TourRating, TourSession, User
 from app.schemas.tour import StopWithAudio, TourDetail, TourListItem, TourPackage
-from app.services.catalog import to_list_items
+from app.services.catalog import rating_stats, to_list_items
 
 router = APIRouter(prefix="/tours", tags=["tours"])
 
@@ -62,7 +62,7 @@ async def _like_count(db: AsyncSession, tour_id: uuid.UUID) -> int:
     return result.scalar_one()
 
 
-SortKey = Literal["newest", "price_asc", "price_desc", "duration", "popular"]
+SortKey = Literal["newest", "price_asc", "price_desc", "duration", "popular", "rating"]
 
 
 def _escape_like(term: str) -> str:
@@ -117,6 +117,9 @@ async def list_tours(
     elif sort == "popular":
         likes = select(func.count()).where(TourLike.tour_id == Tour.id).correlate(Tour).scalar_subquery()
         order = [likes.desc()]
+    elif sort == "rating":
+        avg = select(func.avg(TourRating.rating)).where(TourRating.tour_id == Tour.id).correlate(Tour).scalar_subquery()
+        order = [avg.desc().nulls_last()]
     else:
         order = [Tour.created_at.desc()]
     stmt = stmt.order_by(*order, Tour.id).limit(limit).offset(offset)
@@ -162,6 +165,11 @@ async def get_tour(
     detail.stop_count = stop_count_result.scalar_one()
     if tour.preview_audio_filename:
         detail.preview_audio_url = _signed_audio_url(tour.preview_audio_filename)
+    detail.avg_rating, detail.rating_count = (await rating_stats(db, [tour.id])).get(tour.id, (None, 0))
+    if current_user is not None:
+        mine = await db.get(TourRating, {"user_id": current_user.id, "tour_id": tour.id})
+        detail.my_rating = mine.rating if mine else None
+        detail.liked_by_me = await db.get(TourLike, {"user_id": current_user.id, "tour_id": tour.id}) is not None
 
     if current_user is not None and not tour.is_free:
         purchase_result = await db.execute(
