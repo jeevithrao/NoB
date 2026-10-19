@@ -1,9 +1,12 @@
 import uuid
 from datetime import datetime
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 from app.schemas.common import ORMBase
+from app.schemas.tour import NeighbourhoodRef
 
 
 class PurchaseCreate(BaseModel):
@@ -18,6 +21,32 @@ class PurchaseOut(ORMBase):
     is_locked: bool
     gateway_order_id: str | None
     created_at: datetime
+
+
+class BookingTour(ORMBase):
+    id: uuid.UUID
+    name: str
+    cover_image: str | None
+    duration_min: int | None
+    distance_km: float | None = None
+    neighbourhood: NeighbourhoodRef | None = None
+
+
+class BookingOut(BaseModel):
+    """One row of "My Bookings"."""
+
+    purchase_id: uuid.UUID
+    status: Literal["completed", "refunded"]
+    amount_paise: int
+    purchased_at: datetime
+    tour: BookingTour
+    walk_status: Literal["not_started", "in_progress", "completed"]
+    stops_visited: int
+    stop_count: int
+    session_id: uuid.UUID | None = None
+    device_bound: bool
+    can_refund: bool
+    refund_deadline: datetime | None = None
 
 
 class PurchaseCreateResponse(BaseModel):
