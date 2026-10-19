@@ -37,9 +37,10 @@ limiter = SlidingWindowLimiter()
 
 
 def client_ip(request: Request) -> str:
-    """Client IP. Behind nginx the proxy must set X-Forwarded-For (it does in
-    nginx.conf); only the first hop is trusted."""
+    """Client IP. nginx appends the real peer address to X-Forwarded-For
+    ($proxy_add_x_forwarded_for), so the LAST entry is the trustworthy one;
+    earlier entries can be forged by the client."""
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        return forwarded.split(",")[-1].strip()
     return request.client.host if request.client else "unknown"
