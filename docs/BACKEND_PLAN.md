@@ -9,12 +9,12 @@ Status legend: ⬜ todo · 🟦 in progress · ✅ done
 ## Day 1 — Safe and reproducible
 | # | Chunk | Branch | Status |
 |---|---|---|---|
-| 0 | Repo structure, docs folder, CONTRIBUTING | `feat/repo-structure` | 🟦 |
-| 1 | Close OTP account-takeover, auth hardening, rate limits | `fix/otp-takeover` | ⬜ |
-| 2 | Alembic baseline from models + neighbourhoods + completed-session partial index | `feat/db-baseline` | ⬜ |
-| 3 | pytest harness, auth/device tests, CI | `test/harness-and-auth` | ⬜ |
+| 0 | Repo structure, docs folder, CONTRIBUTING | `feat/repo-structure` | ✅ |
+| 1 | Close OTP account-takeover, auth hardening, rate limits | `fix/otp-takeover` | ✅ |
+| 2 | Alembic baseline from models + neighbourhoods + completed-session partial index | `feat/db-baseline` | ✅ |
+| 3 | pytest harness, auth/device tests, CI | `test/harness-and-auth` | ✅ |
 
-**Checkpoint 1** (`v0.2-cp1`): secure auth, DB rebuildable from Alembic, green CI.
+**Checkpoint 1** (`v0.2-cp1`) ✅ secure auth, DB rebuildable from Alembic, 58 passing tests, CI workflow.
 
 ## Day 2 — Money and screens
 | # | Chunk | Branch | Status |
