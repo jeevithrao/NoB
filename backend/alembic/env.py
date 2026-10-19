@@ -7,20 +7,9 @@ import sys
 # Add the backend folder to Python path so imports work
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import all models so Alembic can detect them
+# Import all models so Alembic can detect them (the package __init__ registers every table)
 from app.database import Base
-from app.models import (
-    User,
-    UserLoginSession,
-    Tour,
-    Stop,
-    Purchase,
-    TourSession,
-    SessionEvent,
-    SavedTour,
-    TourLike,
-    TourComment
-)
+from app import models as _models  # noqa: F401
 
 # Alembic config
 config = context.config
