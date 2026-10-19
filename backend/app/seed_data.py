@@ -28,6 +28,10 @@ TOURS = [
     {
         "name": "Malleshwaram Morning Market Walk",
         "neighbourhood": "malleshwaram",
+        "is_featured": True,
+        "gallery_images": ["https://images.unsplash.com/photo-1596484552834-6a58f850e0a1", "https://images.unsplash.com/photo-1587474260584-136574528ed5"],
+        "includes": ["Audio guide (English + Kannada)", "Digital walk map", "Historical notes", "Free cancellation before you start"],
+        "languages": ["English", "Kannada"],
         "description": (
             "A ~2km walk through Malleshwaram's flower and vegetable markets, "
             "temple lanes, and century-old bungalows, tracing how one of "
@@ -63,6 +67,10 @@ TOURS = [
     {
         "name": "Basavanagudi Heritage Trail",
         "neighbourhood": "basavanagudi",
+        "is_featured": False,
+        "gallery_images": ["https://images.unsplash.com/photo-1600100397608-e1d6c8fa6c0c"],
+        "includes": ["Audio guide (English)", "Digital walk map", "Free cancellation before you start"],
+        "languages": ["English"],
         "description": (
             "Wander past Bull Temple, Bugle Rock, and the old Basavanagudi "
             "bungalows on a walk through one of the city's most storied south-side neighbourhoods."
@@ -91,6 +99,10 @@ TOURS = [
     {
         "name": "Cubbon Park Free Sampler Walk",
         "neighbourhood": "cubbon-park",
+        "is_featured": False,
+        "gallery_images": ["https://images.unsplash.com/photo-1585129918465-045a1e0d858b"],
+        "includes": ["Audio guide (English)", "Free sampler walk"],
+        "languages": ["English"],
         "description": "A short free taster walk through Cubbon Park to try the app before buying a full tour.",
         "city": "Bangalore",
         "cover_image": "https://images.unsplash.com/photo-1585129918465-045a1e0d858b",
