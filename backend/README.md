@@ -46,9 +46,9 @@ pip install -r requirements.txt
 cp .env.example .env
 # edit .env if your DB creds differ from the docker-compose defaults
 
-# 4. Schema — the base schema is raw SQL (not yet in Alembic history),
-#    apply it once, then let Alembic take over for everything after:
-psql "$DATABASE_URL_SYNC" -f ../database/Nob_schema.sql
+# 4. Schema — Alembic builds everything from an empty database
+#    (no hand-applied SQL). Existing pre-baseline local DBs must be recreated:
+#    docker compose down -v && docker compose up -d
 alembic upgrade head
 
 # 5. Seed a few real Bangalore tours + an admin user
