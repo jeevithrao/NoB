@@ -31,3 +31,18 @@ Changes relative to `design/07-api-specification.md`. Newest first. Fold into th
   (`401 INVALID_SIGNATURE`), is idempotent by event id, understands `payment.captured`, `order.paid`, `payment.failed`.
   Not client-facing.
 - **New error codes** `GATEWAY_ERROR` (502), `INVALID_SIGNATURE` (400/401), `INVALID_PAYLOAD` (400), `MOCK_MODE_ACTIVE` (400).
+
+### Catalog, bookings, neighbourhoods (feat/catalog-bookings)
+- **Changed** `GET /tours`: new query params `q` (search name/description/neighbourhood), `neighbourhood` (slug or id), `free`,
+  `min_price`, `max_price` (paise), `sort` = newest|price_asc|price_desc|duration|popular, `limit` (1-100, default 50), `offset`.
+  Items now include `neighbourhood {id,name,slug}` and `is_featured`.
+- **New** `GET /tours/featured` - the "Featured walks" carousel.
+- **Changed** `GET /tours/{id}`: adds `gallery_images[]`, `includes[]`, `languages[]`, `preview_audio_url` (signed, time-limited, public).
+- **New** `GET /neighbourhoods?city=&include_empty=` and `GET /neighbourhoods/{id_or_slug}` (detail includes its tours with the caller's status). `404 NEIGHBOURHOOD_NOT_FOUND`.
+- **New** `GET /purchases?tab=upcoming|past|all` - "My Bookings". Each row: `purchase_id, status (completed|refunded), amount_paise, purchased_at,
+  tour{id,name,cover_image,duration_min,distance_km,neighbourhood}, walk_status (not_started|in_progress|completed), stops_visited, stop_count,
+  session_id, device_bound, can_refund, refund_deadline`.
+- **Changed** `POST /purchases/{id}/refund`: 14-day window (`REFUND_WINDOW_DAYS`) -> `409 REFUND_WINDOW_EXPIRED`; any started or completed walk -> `409 REFUND_NOT_ELIGIBLE`
+  (all sessions are checked); refunds the payment at the gateway when real payments are on (`502 GATEWAY_ERROR`, nothing changed, safe to retry); clears the device binding.
+- **Admin** `POST /admin/neighbourhoods`, `PUT /admin/neighbourhoods/{id}`; tour create/update accept `neighbourhood_id, is_featured, gallery_images, includes, languages, preview_audio_filename`; negative prices are rejected.
+- Not supported by design: rescheduling a booking (a purchase is a one-time licence, not a time slot).

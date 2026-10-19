@@ -20,7 +20,7 @@ Status legend: ⬜ todo · 🟦 in progress · ✅ done
 | # | Chunk | Branch | Status |
 |---|---|---|---|
 | 4 | Razorpay order + signature-verified idempotent webhook (mock fallback) | `feat/payments` | ✅ |
-| 5 | `GET /purchases` (bookings), refund window, neighbourhood endpoints, tour search/filters | `feat/catalog-bookings` | ⬜ |
+| 5 | `GET /purchases` (bookings), refund window, neighbourhood endpoints, tour search/filters | `feat/catalog-bookings` | ✅ |
 | 6 | Ratings, passport (stamps) and profile-stats endpoints | `feat/ratings-passport` | ⬜ |
 | 7 | Licensing tests: duplicate purchase, replayed webhook, consumed tour, resume, kick-out, admin 403 | `test/licensing` | ⬜ |
 
