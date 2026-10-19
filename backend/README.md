@@ -7,9 +7,10 @@ FastAPI backend for the Neighbourhoods of Bangalore audio walking-tour app.
 - **Auth** — signup/login (email+password), JWT access + refresh tokens,
   single-active-session enforcement (logging in on a new device kicks the old
   one out — see `dependencies.py` / `routers/auth.py`).
-  *Not yet implemented*: OTP verification, Google sign-in (both are stubbed
-  as "next" in the docs and skipped here so the flow works end-to-end without
-  an SMS/email provider).
+  Email OTP sign-in (`/auth/request-otp`, `/auth/verify-otp`) and Google
+  sign-in are implemented. OTP codes are **emailed** (SMTP) — set
+  `EMAIL_BACKEND=console` and `EXPOSE_DEV_OTP=true` in development to read them
+  from the server log / response. Auth endpoints are rate-limited.
 - **Tours** — catalog (`GET /tours`), detail, and the offline download
   manifest (`GET /tours/{id}/package`) with per-user status
   (`not_purchased` / `purchased` / `in_progress` / `completed_locked`).
@@ -51,8 +52,9 @@ psql "$DATABASE_URL_SYNC" -f ../database/Nob_schema.sql
 alembic upgrade head
 
 # 5. Seed a few real Bangalore tours + an admin user
+#    Set ADMIN_EMAIL / ADMIN_PASSWORD in .env, or a random password is
+#    generated and printed once.
 python -m app.seed
-# -> admin@nob.app / AdminPass123!  (CHANGE before this ever goes near prod)
 
 # 6. Generate real (robotic but genuinely playable) narration audio for
 #    every seeded stop, via espeak-ng + ffmpeg — swap for real recordings
@@ -88,7 +90,4 @@ app/
   real enough to test playback end-to-end but not real narration — swap for
   professionally recorded audio before shipping.
 - Real payment gateway integration (Razorpay recommended per the docs).
-- OTP verification step for signup.
-- Google sign-in.
-- Refund endpoint (business rule is written, no endpoint yet — needs the
-  refund policy window decision called out in the docs first).
+- Refund time window (14 days) — tracked in `docs/BACKEND_PLAN.md`.
