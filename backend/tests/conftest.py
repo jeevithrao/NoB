@@ -112,3 +112,22 @@ def outbox():
     from app.services import email as email_service
 
     return email_service.get_email_backend().outbox
+
+
+@pytest.fixture
+def razorpay(monkeypatch):
+    """Real-payments mode with a fake Razorpay behind it."""
+    import httpx
+
+    from app.config import settings
+    from app.services import payments
+    from tests.payments_helpers import KEY_ID, KEY_SECRET, WEBHOOK_SECRET, FakeRazorpay
+
+    monkeypatch.setattr(settings, "MOCK_PAYMENTS", False)
+    monkeypatch.setattr(settings, "RAZORPAY_KEY_ID", KEY_ID)
+    monkeypatch.setattr(settings, "RAZORPAY_KEY_SECRET", KEY_SECRET)
+    monkeypatch.setattr(settings, "RAZORPAY_WEBHOOK_SECRET", WEBHOOK_SECRET)
+    fake = FakeRazorpay()
+    payments.set_transport(httpx.MockTransport(fake.handler))
+    yield fake
+    payments.set_transport(None)
