@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, func, Index
+from sqlalchemy import String, Integer, Boolean, CheckConstraint, DateTime, ForeignKey, func, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
@@ -19,6 +19,10 @@ class Purchase(Base):
             unique=True,
             postgresql_where="status IN ('pending', 'completed')",
         ),
+        CheckConstraint(
+            "status IN ('pending', 'completed', 'failed', 'refunded')", name="ck_purchases_status"
+        ),
+        CheckConstraint("amount_paise >= 0", name="ck_purchases_amount_non_negative"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

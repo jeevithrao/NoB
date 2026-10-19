@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, ForeignKey, func, UniqueConstraint
+from sqlalchemy import CheckConstraint, String, DateTime, ForeignKey, func, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
@@ -8,7 +8,13 @@ from app.database import Base
 
 class SessionEvent(Base):
     __tablename__ = "session_events"
-    __table_args__ = (UniqueConstraint("client_event_id", name="uq_session_events_client_event_id"),)
+    __table_args__ = (
+        UniqueConstraint("client_event_id", name="uq_session_events_client_event_id"),
+        CheckConstraint(
+            "event_type IN ('arrived', 'audio_started', 'audio_finished', 'skipped')",
+            name="ck_session_events_event_type",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
