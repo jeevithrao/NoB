@@ -9,6 +9,12 @@ from app.schemas.common import ORMBase
 TourStatus = Literal["not_purchased", "purchased", "in_progress", "completed_locked"]
 
 
+class NeighbourhoodRef(ORMBase):
+    id: uuid.UUID
+    name: str
+    slug: str
+
+
 class TourListItem(ORMBase):
     id: uuid.UUID
     name: str
@@ -19,6 +25,8 @@ class TourListItem(ORMBase):
     distance_km: Decimal | None
     price_paise: int
     is_free: bool
+    neighbourhood: NeighbourhoodRef | None = None
+    is_featured: bool = False
     status: TourStatus = "not_purchased"
     like_count: int = 0
 
@@ -27,6 +35,11 @@ class TourDetail(TourListItem):
     is_published: bool
     stop_count: int = 0
     purchase_id: uuid.UUID | None = None
+    gallery_images: list[str] = []
+    includes: list[str] = []
+    languages: list[str] = []
+    # Short promotional sample (time-limited signed URL); visible before purchase.
+    preview_audio_url: str | None = None
 
 
 class StopOut(ORMBase):
@@ -72,8 +85,14 @@ class TourCreate(BaseModel):
     cover_image: str | None = None
     duration_min: int | None = None
     distance_km: Decimal | None = None
-    price_paise: int = 0
+    price_paise: int = Field(default=0, ge=0)
     is_free: bool = False
+    neighbourhood_id: uuid.UUID | None = None
+    is_featured: bool = False
+    gallery_images: list[str] = []
+    includes: list[str] = []
+    languages: list[str] = []
+    preview_audio_filename: str | None = None
 
 
 class TourUpdate(BaseModel):
@@ -83,5 +102,11 @@ class TourUpdate(BaseModel):
     cover_image: str | None = None
     duration_min: int | None = None
     distance_km: Decimal | None = None
-    price_paise: int | None = None
+    price_paise: int | None = Field(default=None, ge=0)
     is_free: bool | None = None
+    neighbourhood_id: uuid.UUID | None = None
+    is_featured: bool | None = None
+    gallery_images: list[str] | None = None
+    includes: list[str] | None = None
+    languages: list[str] | None = None
+    preview_audio_filename: str | None = None

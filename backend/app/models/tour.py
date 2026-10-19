@@ -1,9 +1,9 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import String, Integer, Boolean, Numeric, DateTime, ForeignKey, Text, CheckConstraint, func
+from sqlalchemy import String, Integer, Boolean, Numeric, DateTime, ForeignKey, Text, CheckConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from app.database import Base
 
 
@@ -23,6 +23,12 @@ class Tour(Base):
     cover_image: Mapped[str | None] = mapped_column(String(500))
     duration_min: Mapped[int | None] = mapped_column(Integer)
     distance_km: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    is_featured: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default=text("false"), index=True)
+    # Content shown on the tour detail page
+    gallery_images: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    includes: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    languages: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    preview_audio_filename: Mapped[str | None] = mapped_column(String(500))
     price_paise: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_free: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_published: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
@@ -34,7 +40,7 @@ class Tour(Base):
     )
 
     # Relationships
-    neighbourhood: Mapped["Neighbourhood | None"] = relationship(back_populates="tours")
+    neighbourhood: Mapped["Neighbourhood | None"] = relationship(back_populates="tours", lazy="joined")
     stops: Mapped[list["Stop"]] = relationship(
         back_populates="tour",
         order_by="Stop.order_index",
