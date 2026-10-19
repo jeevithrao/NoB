@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import String, Integer, Numeric, DateTime, Text, ForeignKey, func, UniqueConstraint
+from sqlalchemy import CheckConstraint, String, Integer, Numeric, DateTime, Text, ForeignKey, func, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
@@ -9,7 +9,10 @@ from app.database import Base
 
 class Stop(Base):
     __tablename__ = "stops"
-    __table_args__ = (UniqueConstraint("tour_id", "order_index"),)
+    __table_args__ = (
+        UniqueConstraint("tour_id", "order_index"),
+        CheckConstraint("trigger_radius_m > 0", name="ck_stops_trigger_radius_positive"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4

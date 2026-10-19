@@ -1,5 +1,6 @@
 from app.models.user import User
 from app.models.user_login_session import UserLoginSession
+from app.models.neighbourhood import Neighbourhood
 from app.models.tour import Tour
 from app.models.stop import Stop
 from app.models.purchase import Purchase

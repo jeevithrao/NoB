@@ -16,4 +16,5 @@ RUN mkdir -p /app/media/audio /app/media/images
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# Apply pending migrations, then serve. (Rate limits are per worker process.)
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4"]

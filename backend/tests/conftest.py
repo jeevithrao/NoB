@@ -45,11 +45,23 @@ from app import models as _models  # noqa: E402,F401  (register every model on B
 from app.services.email import MemoryBackend, set_email_backend  # noqa: E402
 
 
+BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 @pytest.fixture(scope="session")
 def sync_engine():
+    """Fresh database built by the real Alembic migrations (not create_all), so
+    the tests exercise exactly the schema production gets."""
+    from alembic import command
+    from alembic.config import Config
+
     engine = create_engine(_SYNC_URL)
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(text("DROP SCHEMA public CASCADE"))
+        conn.execute(text("CREATE SCHEMA public"))
+    cfg = Config(os.path.join(BACKEND_DIR, "alembic.ini"))
+    cfg.set_main_option("script_location", os.path.join(BACKEND_DIR, "alembic"))
+    command.upgrade(cfg, "head")
     yield engine
     engine.dispose()
 
@@ -57,7 +69,7 @@ def sync_engine():
 @pytest.fixture(autouse=True)
 def clean_state(sync_engine):
     """Empty every table and reset in-process state before each test."""
-    tables = ", ".join(f'"{t.name}"' for t in Base.metadata.sorted_tables)
+    tables = ", ".join(f'"{t.name}"' for t in Base.metadata.sorted_tables)  # alembic_version is kept
     with sync_engine.begin() as conn:
         conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
     limiter.reset()

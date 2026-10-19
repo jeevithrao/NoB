@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, Boolean, ForeignKey, Text, func
+from sqlalchemy import String, DateTime, Boolean, CheckConstraint, ForeignKey, Index, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
@@ -8,6 +8,10 @@ from app.database import Base
 
 class TourComment(Base):
     __tablename__ = "tour_comments"
+    __table_args__ = (
+        CheckConstraint("char_length(content) BETWEEN 1 AND 1000", name="ck_tour_comments_content_length"),
+        Index("idx_tour_comments_tour_created", "tour_id", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
