@@ -25,9 +25,10 @@ async def make_tour(
     published: bool = True,
     stops: int = 3,
     neighbourhood_id: uuid.UUID | None = None,
+    **fields,
 ) -> dict:
     async with client.session_factory() as db:
-        tour = Tour(
+        attrs = dict(
             name=name or f"Tour {uuid.uuid4().hex[:6]}",
             description="A test walk.",
             city="Bangalore",
@@ -38,6 +39,8 @@ async def make_tour(
             is_published=published,
             neighbourhood_id=neighbourhood_id,
         )
+        attrs.update(fields)  # callers may override any default
+        tour = Tour(**attrs)
         db.add(tour)
         await db.flush()
         stop_ids = []
