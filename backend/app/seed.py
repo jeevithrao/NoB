@@ -10,8 +10,8 @@ import secrets
 from app.config import settings
 from app.core.security import hash_password
 from app.database import AsyncSessionLocal
-from app.models import Stop, Tour, User
-from app.seed_data import TOURS
+from app.models import Neighbourhood, Stop, Tour, User
+from app.seed_data import NEIGHBOURHOODS, TOURS
 from sqlalchemy import select
 
 
@@ -40,6 +40,17 @@ async def seed() -> None:
         else:
             print(f"Admin user already exists: {ADMIN_EMAIL}")
 
+        hoods: dict[str, Neighbourhood] = {}
+        for hood_data in NEIGHBOURHOODS:
+            result = await db.execute(select(Neighbourhood).where(Neighbourhood.slug == hood_data["slug"]))
+            hood = result.scalar_one_or_none()
+            if hood is None:
+                hood = Neighbourhood(**hood_data)
+                db.add(hood)
+                await db.flush()
+                print(f"Created neighbourhood: {hood.name}")
+            hoods[hood.slug] = hood
+
         for tour_data in TOURS:
             result = await db.execute(select(Tour).where(Tour.name == tour_data["name"]))
             if result.scalar_one_or_none() is not None:
@@ -48,7 +59,8 @@ async def seed() -> None:
 
             tour_data = copy.deepcopy(tour_data)
             stops_data = tour_data.pop("stops")
-            tour = Tour(**tour_data, is_published=True)
+            hood = hoods[tour_data.pop("neighbourhood")]
+            tour = Tour(**tour_data, neighbourhood_id=hood.id, is_published=True)
             db.add(tour)
             await db.flush()
 

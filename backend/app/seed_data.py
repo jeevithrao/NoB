@@ -1,8 +1,33 @@
 """Shared demo tour data used by both app.seed and the placeholder audio generator."""
 
+NEIGHBOURHOODS = [
+    {
+        "name": "Malleshwaram",
+        "slug": "malleshwaram",
+        "description": "One of Bangalore's oldest planned extensions: temple lanes, a bustling 8th Cross market and century-old bungalows.",
+        "centroid_lat": 13.0035,
+        "centroid_lng": 77.5647,
+    },
+    {
+        "name": "Basavanagudi",
+        "slug": "basavanagudi",
+        "description": "A storied south-side neighbourhood of ancient rock formations, the Bull Temple and leafy parks.",
+        "centroid_lat": 12.9425,
+        "centroid_lng": 77.5748,
+    },
+    {
+        "name": "Cubbon Park",
+        "slug": "cubbon-park",
+        "description": "The city's green lung, ringed by Victorian-era landmarks in the heart of Bangalore.",
+        "centroid_lat": 12.9763,
+        "centroid_lng": 77.5929,
+    },
+]
+
 TOURS = [
     {
         "name": "Malleshwaram Morning Market Walk",
+        "neighbourhood": "malleshwaram",
         "description": (
             "A ~2km walk through Malleshwaram's flower and vegetable markets, "
             "temple lanes, and century-old bungalows, tracing how one of "
@@ -37,6 +62,7 @@ TOURS = [
     },
     {
         "name": "Basavanagudi Heritage Trail",
+        "neighbourhood": "basavanagudi",
         "description": (
             "Wander past Bull Temple, Bugle Rock, and the old Basavanagudi "
             "bungalows on a walk through one of the city's most storied south-side neighbourhoods."
@@ -64,6 +90,7 @@ TOURS = [
     },
     {
         "name": "Cubbon Park Free Sampler Walk",
+        "neighbourhood": "cubbon-park",
         "description": "A short free taster walk through Cubbon Park to try the app before buying a full tour.",
         "city": "Bangalore",
         "cover_image": "https://images.unsplash.com/photo-1585129918465-045a1e0d858b",
