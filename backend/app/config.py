@@ -1,9 +1,18 @@
-from pydantic_settings import BaseSettings
 from functools import lru_cache
 from typing import List
 
+from pydantic import model_validator
+from pydantic_settings import BaseSettings
+
+_PLACEHOLDER_SECRET_MARKERS = ("change-this", "changeme", "change_me", "your-secret")
+
 
 class Settings(BaseSettings):
+    # Runtime environment: "development" | "staging" | "production".
+    # Anything other than "development" turns on strict startup checks (see
+    # _validate_for_environment) so dev-only shortcuts can never ship.
+    ENVIRONMENT: str = "development"
+
     # Database
     DATABASE_URL: str
     DATABASE_URL_SYNC: str
@@ -37,6 +46,32 @@ class Settings(BaseSettings):
     # to rotate media keys independently of auth tokens.
     MEDIA_SIGNING_KEY: str | None = None
 
+    # Email (OTP delivery). "console" logs the message (dev only), "smtp" sends
+    # real mail, "memory" keeps messages in-process (used by the test-suite).
+    EMAIL_BACKEND: str = "console"
+    EMAIL_FROM: str = "NoB <no-reply@nob.app>"
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_USE_TLS: bool = True
+
+    # OTP policy
+    OTP_TTL_SECONDS: int = 600
+    OTP_MAX_ATTEMPTS: int = 5
+    OTP_MAX_REQUESTS_PER_WINDOW: int = 3  # per email, per OTP_TTL_SECONDS
+    # Development convenience ONLY: echo the OTP in the /auth/request-otp
+    # response. Ignored (and rejected at startup) outside development.
+    EXPOSE_DEV_OTP: bool = False
+
+    # Rate limits (per client IP and per account, sliding 60s window).
+    # In-memory, so counts are per-process; fine for a single API container.
+    RATE_LIMIT_AUTH_PER_MINUTE: int = 10
+
+    # Admin bootstrap used by `python -m app.seed` (never hardcode these).
+    ADMIN_EMAIL: str = "admin@nob.app"
+    ADMIN_PASSWORD: str | None = None
+
     # Debug — gates SQLAlchemy query logging (echo=True exposes passwords
     # and JWTs in logs when not in development).
     DEBUG: bool = False
@@ -52,6 +87,28 @@ class Settings(BaseSettings):
     @property
     def allowed_origins_list(self) -> List[str]:
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
+
+    @model_validator(mode="after")
+    def _validate_for_environment(self) -> "Settings":
+        if self.ENVIRONMENT == "development":
+            return self
+        problems: list[str] = []
+        key = self.SECRET_KEY.lower()
+        if len(self.SECRET_KEY) < 32 or any(m in key for m in _PLACEHOLDER_SECRET_MARKERS):
+            problems.append("SECRET_KEY must be a random value of at least 32 characters")
+        if self.EXPOSE_DEV_OTP:
+            problems.append("EXPOSE_DEV_OTP must be false")
+        if self.EMAIL_BACKEND != "smtp":
+            problems.append("EMAIL_BACKEND must be 'smtp'")
+        if self.MOCK_PAYMENTS:
+            problems.append("MOCK_PAYMENTS must be false")
+        if self.DEBUG:
+            problems.append("DEBUG must be false")
+        if problems:
+            raise ValueError(
+                f"Unsafe configuration for ENVIRONMENT={self.ENVIRONMENT}: " + "; ".join(problems)
+            )
+        return self
 
     class Config:
         env_file = ".env"
