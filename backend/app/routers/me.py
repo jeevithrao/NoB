@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import Neighbourhood, Tour, TourSession, User
+from app.models import Neighbourhood, Tour, TourRating, TourSession, User
 from app.schemas.me import Passport, PassportStamp, ProfileStats
 from app.schemas.tour import NeighbourhoodRef
 
@@ -27,6 +27,7 @@ async def _completed_walks(db: AsyncSession, user: User):
                 Tour.distance_km,
                 Tour.duration_min,
                 Tour.neighbourhood_id,
+                Tour.name.label("tour_name"),
             )
             .join(Tour, Tour.id == TourSession.tour_id)
             .where(TourSession.user_id == user.id, TourSession.completed.is_(True))
@@ -38,18 +39,23 @@ async def _completed_walks(db: AsyncSession, user: User):
 async def my_stats(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """The three numbers on the Profile screen (plus a couple of extras)."""
     rows = await _completed_walks(db, current_user)
+    reviews = (
+        await db.execute(select(func.count()).select_from(TourRating).where(TourRating.user_id == current_user.id))
+    ).scalar_one()
     return ProfileStats(
         walks_completed=len(rows),
         distance_km=round(sum(float(r.distance_km or 0) for r in rows), 1),
         stops_visited=sum(r.stops_visited for r in rows),
         listening_minutes=sum(r.duration_min or 0 for r in rows),
         neighbourhoods_stamped=len({r.neighbourhood_id for r in rows if r.neighbourhood_id}),
+        reviews_count=reviews,
     )
 
 
 @router.get("/passport", response_model=Passport)
 async def my_passport(
     city: str = Query(default="Bangalore"),
+    include_empty: bool = Query(default=True, description="Also show areas with no published walk yet (locked slots)"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -71,21 +77,25 @@ async def my_passport(
 
     completed: dict[uuid.UUID, int] = defaultdict(int)
     first_at: dict[uuid.UUID, datetime] = {}
+    first_name: dict[uuid.UUID, str] = {}
     for row in await _completed_walks(db, current_user):
         if row.neighbourhood_id is None:
             continue
         completed[row.neighbourhood_id] += 1
         if row.completed_at and (row.neighbourhood_id not in first_at or row.completed_at < first_at[row.neighbourhood_id]):
             first_at[row.neighbourhood_id] = row.completed_at
+            first_name[row.neighbourhood_id] = row.tour_name
 
     stamps = []
     for hood in hoods:
-        if not totals.get(hood.id) and not completed.get(hood.id):
+        if not include_empty and not totals.get(hood.id) and not completed.get(hood.id):
             continue  # nothing to collect there yet
         stamps.append(
             PassportStamp(
                 neighbourhood=NeighbourhoodRef.model_validate(hood),
                 cover_image=hood.cover_image,
+                emoji=hood.emoji,
+                walk_name=first_name.get(hood.id),
                 tours_total=totals.get(hood.id, 0),
                 tours_completed=completed.get(hood.id, 0),
                 stamped=completed.get(hood.id, 0) > 0,

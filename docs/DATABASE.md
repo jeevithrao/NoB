@@ -17,6 +17,8 @@ CI runs the upgrade → downgrade → upgrade round trip and a drift test (`test
 | `0002` | `neighbourhoods` + `tours.neighbourhood_id`, one-completed-session partial unique index, CHECK constraints |
 | `0003` | `payment_events` (webhook deliveries, unique event id) |
 | `0004` | tour catalog fields: `is_featured`, `gallery_images`, `includes`, `languages`, `preview_audio_filename` |
+| `0005` | `tour_ratings` (1-5, one per user and tour) |
+| `0006` | frontend contract: tour `theme/difficulty/start_point/tags/preview_audio_title`, stop `blurb/icon`, neighbourhood `tagline/emoji`, `purchases.booking_ref`, user consent columns |
 
 > The pre-baseline migration chain was replaced (it diffed against a hand-applied SQL file and could not build an empty DB).
 > A local database created before `0001` must be recreated.

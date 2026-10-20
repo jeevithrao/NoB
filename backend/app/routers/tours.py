@@ -9,7 +9,7 @@ from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user, get_current_user_optional
 from app.models import Neighbourhood, Purchase, Stop, Tour, TourLike, TourRating, TourSession, User
-from app.schemas.tour import StopWithAudio, TourDetail, TourListItem, TourPackage
+from app.schemas.tour import StopPreview, StopWithAudio, TourDetail, TourListItem, TourPackage
 from app.services.catalog import rating_stats, to_list_items
 
 router = APIRouter(prefix="/tours", tags=["tours"])
@@ -73,7 +73,10 @@ def _escape_like(term: str) -> str:
 async def list_tours(
     city: str = Query(default="Bangalore"),
     q: str | None = Query(default=None, max_length=100, description="Search name, description, neighbourhood"),
-    neighbourhood: str | None = Query(default=None, description="Neighbourhood slug or id"),
+    neighbourhood: list[str] = Query(default=[], description="Neighbourhood slug or id; repeat to allow several"),
+    theme: list[str] = Query(default=[], description="Theme(s), e.g. Heritage; repeat to allow several"),
+    min_duration: int | None = Query(default=None, ge=0, description="minutes"),
+    max_duration: int | None = Query(default=None, ge=0, description="minutes"),
     free: bool | None = Query(default=None, description="true = only free tours, false = only paid"),
     min_price: int | None = Query(default=None, ge=0, description="paise"),
     max_price: int | None = Query(default=None, ge=0, description="paise"),
@@ -95,10 +98,21 @@ async def list_tours(
             )
         )
     if neighbourhood:
-        try:
-            stmt = stmt.where(Tour.neighbourhood_id == uuid.UUID(neighbourhood))
-        except ValueError:
-            stmt = stmt.where(Tour.neighbourhood.has(Neighbourhood.slug == neighbourhood))
+        ids, slugs = [], []
+        for value in neighbourhood:
+            try:
+                ids.append(uuid.UUID(value))
+            except ValueError:
+                slugs.append(value)
+        stmt = stmt.where(
+            or_(Tour.neighbourhood_id.in_(ids), Tour.neighbourhood.has(Neighbourhood.slug.in_(slugs)))
+        )
+    if theme:
+        stmt = stmt.where(Tour.theme.in_(theme))
+    if min_duration is not None:
+        stmt = stmt.where(Tour.duration_min >= min_duration)
+    if max_duration is not None:
+        stmt = stmt.where(Tour.duration_min <= max_duration)
     if free is True:
         stmt = stmt.where(Tour.is_free.is_(True))
     elif free is False:
@@ -157,12 +171,14 @@ async def get_tour(
 
     status_ = await _user_status_for_tour(db, current_user, tour)
     like_count = await _like_count(db, tour.id)
-    stop_count_result = await db.execute(select(func.count()).select_from(Stop).where(Stop.tour_id == tour.id))
+    stops = (await db.execute(select(Stop).where(Stop.tour_id == tour.id).order_by(Stop.order_index))).scalars().all()
 
     detail = TourDetail.model_validate(tour)
     detail.status = status_
     detail.like_count = like_count
-    detail.stop_count = stop_count_result.scalar_one()
+    detail.stop_count = len(stops)
+    detail.stops_preview = [StopPreview.model_validate(s) for s in stops]  # teaser fields only
+    detail.neighbourhood_description = tour.neighbourhood.description if tour.neighbourhood else None
     if tour.preview_audio_filename:
         detail.preview_audio_url = _signed_audio_url(tour.preview_audio_filename)
     detail.avg_rating, detail.rating_count = (await rating_stats(db, [tour.id])).get(tour.id, (None, 0))
@@ -233,8 +249,10 @@ async def get_tour_package(
             order_index=stop.order_index,
             name=stop.name,
             narrative_text=stop.narrative_text,
-            lat=stop.lat,
-            lng=stop.lng,
+            blurb=stop.blurb,
+            icon=stop.icon,
+            lat=float(stop.lat),
+            lng=float(stop.lng),
             trigger_radius_m=stop.trigger_radius_m,
             audio_url=_signed_audio_url(stop.audio_filename),
         )

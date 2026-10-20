@@ -26,13 +26,19 @@ Status legend: ⬜ todo · 🟦 in progress · ✅ done
 
 **Checkpoint 2** (`v0.2-cp2`) ✅: buy → download → walk → complete passes in tests.
 
-## Day 3 — Account and ship
+## Day 3 — Frontend contract, account, ship (revised after the frontend arrived)
+Decisions (D1-D8): ship web/PWA first; free walks = 0-paise claim; web device recovery = one self-service re-bind per 30 days;
+purchases never expire; in-app notifications only; images local/free for now (owned later); mock payments until keys exist;
+cancellation rules unchanged (14 days, not started).
+
 | # | Chunk | Branch | Status |
 |---|---|---|---|
-| 8 | Forgot password, delete account, data export, consent flags | `feat/account` | ⬜ |
-| 9 | Notifications stub, admin refund/reset rules, error-code audit vs API spec | `feat/admin-errors` | ⬜ |
-| 10 | Staging deploy config (docker, nginx, TLS), S3 seam, Postman collection | `chore/deploy` | ⬜ |
-| 11 | README + docs brought in line with code | `docs/final-sync` | ⬜ |
+| 8 | Contract alignment: new fields, public stop preview, filters, free claims, booking refs, consent, error envelope, seed mirrors frontend | `feat/contract-alignment` | ✅ |
+| 9 | Device recovery (re-bind) + require device on walk start | `feat/device-recovery` | ⬜ |
+| 10 | Account: PATCH /me (+username), preferences, export, delete (anonymise), forgot/reset password | `feat/account` | ⬜ |
+| 11 | In-app notifications | `feat/notifications` | ⬜ |
+| 12 | Integration kit: OpenAPI export, Postman, docker-compose, reference `api.js`, smoke script | `chore/integration` | 🟦 smoke script done |
+| 13 | Staging deploy config, final docs sync | `chore/deploy` | ⬜ |
 
 **Checkpoint 3** (`v0.2.0`): staging-ready, partner can integrate.
 

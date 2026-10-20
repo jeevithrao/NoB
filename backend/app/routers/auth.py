@@ -114,6 +114,9 @@ async def signup(body: SignupRequest, request: Request, db: AsyncSession = Depen
         password_hash=hash_password(body.password),
         full_name=body.full_name,
         role="user",
+        terms_accepted_at=datetime.now(timezone.utc),
+        terms_version=settings.TERMS_VERSION,
+        marketing_opt_in=body.marketing_opt_in,
     )
     db.add(user)
     await db.flush()

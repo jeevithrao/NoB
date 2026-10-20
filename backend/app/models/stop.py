@@ -27,6 +27,9 @@ class Stop(Base):
     lng: Mapped[Decimal] = mapped_column(Numeric(10, 7), nullable=False)
     trigger_radius_m: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
     audio_filename: Mapped[str] = mapped_column(String(500), nullable=False)
+    # Public teaser shown before purchase (narrative_text is the paid narration).
+    blurb: Mapped[str | None] = mapped_column(String(255))
+    icon: Mapped[str | None] = mapped_column(String(16))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

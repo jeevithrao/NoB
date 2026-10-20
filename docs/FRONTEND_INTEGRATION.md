@@ -212,7 +212,11 @@ All 163 pass today. Expect: A/B changes will edit a handful of existing assertio
 
 ---------------------------------------------------------------------------------------------------
 
-## 6. Decisions I need from you
+## 6. Decisions (RESOLVED 2026-10-20)
+
+All recommended options were accepted: D1 web/PWA MVP now; D2 free walks are a 0-paise claim; D3 one self-service re-bind per 30 days; D4 purchases never expire; D5 in-app notifications only; D6 images: local/free for now, owned photos later (frontend keeps its own image source until `cover_image`/`gallery_images` are filled); D7 legal text still to be written (see below); D8 mock payments until Razorpay keys exist. Cancellation copy/rules are left as is. The fake booking QR and demo buttons stay in the prototype on purpose.
+
+Original questions:
 
 - **D1. Web vs React Native.** Ship this as a web/PWA MVP (accept the locked-screen limitation), or use it as the design reference for a later RN app? *(No backend impact, big product impact.)*
 - **D2. Free walks:** create a ₹0 claim (recommended: appears in bookings, one-time like paid ones) or keep them purchase-less?

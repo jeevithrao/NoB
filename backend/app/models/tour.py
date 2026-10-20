@@ -9,7 +9,10 @@ from app.database import Base
 
 class Tour(Base):
     __tablename__ = "tours"
-    __table_args__ = (CheckConstraint("price_paise >= 0", name="ck_tours_price_non_negative"),)
+    __table_args__ = (
+        CheckConstraint("price_paise >= 0", name="ck_tours_price_non_negative"),
+        CheckConstraint("difficulty IS NULL OR difficulty IN ('Easy', 'Moderate', 'Hard')", name="ck_tours_difficulty"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -29,6 +32,12 @@ class Tour(Base):
     includes: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
     languages: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
     preview_audio_filename: Mapped[str | None] = mapped_column(String(500))
+    preview_audio_title: Mapped[str | None] = mapped_column(String(255))
+    # Presentation fields shown on the walk page / filters.
+    theme: Mapped[str | None] = mapped_column(String(50), index=True)  # Heritage, Culture, Nature, Colonial...
+    difficulty: Mapped[str | None] = mapped_column(String(20))  # Easy | Moderate | Hard
+    start_point: Mapped[str | None] = mapped_column(String(255))  # meeting point, e.g. "Sampige Road Metro Gate"
+    tags: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
     price_paise: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_free: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_published: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)

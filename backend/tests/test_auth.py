@@ -16,7 +16,7 @@ async def test_duplicate_signup_is_conflict(client):
     user = await signup(client)
     resp = await client.post(
         "/auth/signup",
-        json={"email": user["email"], "password": "another-pass-1", "device_identifier": "x"},
+        json={"email": user["email"], "password": "another-pass-1", "device_identifier": "x", "accepted_terms": True},
     )
     assert resp.status_code == 409 and resp.json()["error"]["code"] == "EMAIL_TAKEN"
 
@@ -24,7 +24,7 @@ async def test_duplicate_signup_is_conflict(client):
 @pytest.mark.parametrize("password", ["short", ""])
 async def test_weak_password_rejected(client, password):
     resp = await client.post(
-        "/auth/signup", json={"email": new_email(), "password": password, "device_identifier": "x"}
+        "/auth/signup", json={"email": new_email(), "password": password, "device_identifier": "x", "accepted_terms": True}
     )
     assert resp.status_code == 422
 

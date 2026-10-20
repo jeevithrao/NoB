@@ -25,7 +25,9 @@ dist/
 **/.expo/
 
 # Media uploads & local DBs
+backend/media/audio/**/*.wav
 backend/media/audio/*.wav
+backend/media/audio/**/*.mp3
 backend/media/audio/*.mp3
 *.db
 *.sqlite

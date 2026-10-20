@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import PaymentEvent, Purchase, Stop, Tour, TourSession, User
+from app.models import PaymentEvent, Purchase, Stop, Tour, TourRating, TourSession, User
 from app.routers.tours import _BOUND_TO_OTHER_DEVICE_MSG
 from app.schemas.purchase import (
     BindDeviceRequest,
@@ -45,6 +45,26 @@ async def _active_purchase(db: AsyncSession, user_id: uuid.UUID, tour_id: uuid.U
     return result.scalar_one_or_none()
 
 
+async def _claim_free_tour(db: AsyncSession, user: User, tour: Tour) -> PurchaseCreateResponse:
+    """A free walk is "bought" for 0: no gateway, completed immediately. The record
+    makes it show up in My Bookings and behave exactly like a paid walk (one
+    lifetime playback, device binding, refund/cancel before starting)."""
+    existing = await _active_purchase(db, user.id, tour.id)
+    if existing is not None:
+        raise _api_error(status.HTTP_409_CONFLICT, "TOUR_ALREADY_OWNED", "You already own this tour.")
+    try:
+        async with db.begin_nested():
+            purchase = Purchase(user_id=user.id, tour_id=tour.id, amount_paise=0, status="completed")
+            db.add(purchase)
+            await db.flush()
+    except IntegrityError:
+        raise _api_error(status.HTTP_409_CONFLICT, "TOUR_ALREADY_OWNED", "You already own this tour.")
+    await db.commit()
+    return PurchaseCreateResponse(
+        purchase_id=purchase.id, status="completed", gateway_order_id=None, gateway_config={"free": True}
+    )
+
+
 @router.post("/purchases", response_model=PurchaseCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_purchase(
     body: PurchaseCreate,
@@ -55,7 +75,7 @@ async def create_purchase(
     if tour is None or not tour.is_published:
         raise _api_error(status.HTTP_404_NOT_FOUND, "TOUR_NOT_FOUND", "Tour not found.")
     if tour.is_free:
-        raise _api_error(status.HTTP_400_BAD_REQUEST, "TOUR_IS_FREE", "This tour doesn't require purchase.")
+        return await _claim_free_tour(db, current_user, tour)
 
     # failed/refunded rows are outside the partial unique index, so a retry or
     # re-buy creates a fresh row.
@@ -175,6 +195,16 @@ async def list_my_purchases(
     ).scalars():
         sessions_by_tour.setdefault(sess.tour_id, []).append(sess)
 
+    my_ratings = {
+        r[0]: r[1]
+        for r in (
+            await db.execute(
+                select(TourRating.tour_id, TourRating.rating).where(
+                    TourRating.user_id == current_user.id, TourRating.tour_id.in_(tour_ids)
+                )
+            )
+        ).all()
+    }
     now = datetime.now(timezone.utc)
     out: list[BookingOut] = []
     for purchase in purchases:
@@ -193,6 +223,7 @@ async def list_my_purchases(
         out.append(
             BookingOut(
                 purchase_id=purchase.id,
+                booking_ref=purchase.booking_ref,
                 status=purchase.status,
                 amount_paise=purchase.amount_paise,
                 purchased_at=purchase.created_at,
@@ -201,6 +232,8 @@ async def list_my_purchases(
                 stops_visited=latest.stops_visited if latest else 0,
                 stop_count=stop_counts.get(purchase.tour_id, 0),
                 session_id=latest.id if latest and not latest.completed else None,
+                completed_at=latest.completed_at if latest and latest.completed else None,
+                my_rating=my_ratings.get(purchase.tour_id),
                 device_bound=purchase.device_id is not None,
                 can_refund=refundable,
                 refund_deadline=_refund_deadline(purchase) if refundable else None,

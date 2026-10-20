@@ -1,6 +1,6 @@
 import uuid
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.schemas.user import UserOut
 
@@ -10,6 +10,15 @@ class SignupRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     full_name: str | None = None
     device_identifier: str = Field(min_length=1, max_length=255)
+    accepted_terms: bool  # must be true: the Terms/Privacy checkbox
+    marketing_opt_in: bool = False  # optional updates checkbox
+
+    @field_validator("accepted_terms")
+    @classmethod
+    def _terms_required(cls, value: bool) -> bool:
+        if not value:
+            raise ValueError("You must accept the Terms of Service and Privacy Policy.")
+        return value
 
 
 class LoginRequest(BaseModel):

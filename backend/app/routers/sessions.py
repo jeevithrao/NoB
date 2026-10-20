@@ -35,18 +35,16 @@ async def create_or_resume_session(
     if tour is None or not tour.is_published:
         raise _api_error(status.HTTP_404_NOT_FOUND, "TOUR_NOT_FOUND", "Tour not found.")
 
-    purchase = None
-    if not tour.is_free:
-        result = await db.execute(
-            select(Purchase).where(
-                Purchase.user_id == current_user.id,
-                Purchase.tour_id == tour.id,
-                Purchase.status == "completed",
-            )
+    result = await db.execute(
+        select(Purchase).where(
+            Purchase.user_id == current_user.id,
+            Purchase.tour_id == tour.id,
+            Purchase.status == "completed",
         )
-        purchase = result.scalar_one_or_none()
-        if purchase is None:
-            raise _api_error(status.HTTP_403_FORBIDDEN, "TOUR_NOT_OWNED", "You need to purchase this tour first.")
+    )
+    purchase = result.scalar_one_or_none()
+    if purchase is None and not tour.is_free:
+        raise _api_error(status.HTTP_403_FORBIDDEN, "TOUR_NOT_OWNED", "You need to purchase this tour first.")
 
     existing_result = await db.execute(
         select(TourSession)

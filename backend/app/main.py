@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -35,6 +36,28 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     else:
         body = {"error": {"code": "HTTP_ERROR", "message": str(detail)}}
     return JSONResponse(status_code=exc.status_code, content=body)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Same {"error": {...}} envelope as every other error, plus a per-field map
+    so forms can highlight the offending inputs."""
+    fields: dict[str, str] = {}
+    for err in exc.errors():
+        loc = [str(part) for part in err.get("loc", ()) if part not in ("body", "query", "path", "header")]
+        message = str(err.get("msg", "Invalid value")).removeprefix("Value error, ")
+        fields.setdefault(".".join(loc) or "request", message)
+    first = next(iter(fields.items()), ("request", "Invalid request"))
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": {
+                "code": "VALIDATION_ERROR",
+                "message": f"{first[0]}: {first[1]}" if first[0] != "request" else first[1],
+                "fields": fields,
+            }
+        },
+    )
 
 
 app.include_router(auth.router)
