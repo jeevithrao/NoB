@@ -76,12 +76,14 @@ async def test_sorting(client):
 async def test_popular_sort_orders_by_likes(client):
     quiet = await make_tour(client, name="Quiet")
     loved = await make_tour(client, name="Loved")
-    for tour in (quiet, loved):
-        pass
-    # likes require a completed walk? no: likes are open to any signed-in user in the current API
-    for _ in range(2):
+    from app.models import TourLike
+
+    for _ in range(2):  # likes need a completed walk via the API, so seed them directly
         user = await signup(client)
-        await client.post(f"/tours/{loved['id']}/like", headers=auth(user["access_token"]))
+        async with client.session_factory() as db:
+            db.add(TourLike(user_id=uuid.UUID(user["user"]["id"]), tour_id=loved["id"]))
+            await db.commit()
+    assert quiet["id"]
     resp = await client.get("/tours", params={"sort": "popular"})
     assert ids(resp)[0] == str(loved["id"]) and resp.json()[0]["like_count"] == 2
 
