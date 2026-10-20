@@ -94,3 +94,15 @@ Driven by `docs/FRONTEND_INTEGRATION.md`.
 - **Changed** `POST /sessions` now returns `409 BOUND_TO_OTHER_DEVICE` when the purchase is bound to a different device than the current login.
 - **Changed** the `BOUND_TO_OTHER_DEVICE` message points to My Bookings instead of "re-download".
 
+### Account (feat/account)
+- **New** `GET /me` (same as `/auth/me`), `PATCH /me {full_name?, username?}` - username is stored lower-case, 3-30 of `a-z 0-9 _`, a leading `@` is stripped,
+  `null` clears it, `409 USERNAME_TAKEN`. Email is not editable. `UserOut` now includes `username`, `notifications_enabled`, `analytics_opt_in`, `marketing_opt_in`.
+- **New** `PATCH /me/preferences {notifications_enabled?, analytics_opt_in?, marketing_opt_in?}` (Settings toggles). Partial; returns the user.
+- **New** `GET /me/export` - "Download my data": JSON attachment (profile, consent, purchases, walks, ratings, comments, likes, saved). No password hashes or tokens.
+- **New** `DELETE /me {"confirm": "DELETE"}` -> 204. Erases comments, likes, ratings, saved tours and pending codes, anonymises the user row (email becomes `deleted-<id>@deleted.invalid`),
+  signs out every device. Purchase, payment and walk records are kept for accounting, no longer tied to a person. The email can sign up again as a new account. Admins: `409 ADMIN_CANNOT_BE_DELETED`.
+- **New** `POST /auth/forgot-password {email}` -> 200 with a generic message (identical for unknown emails; the code is only emailed if the account exists)
+  and `POST /auth/reset-password {email, otp, new_password}` -> 204. Codes are single-use, expire (`OTP_TTL_SECONDS`), lock after `OTP_MAX_ATTEMPTS` wrong tries,
+  and are bound to their purpose (a sign-in code cannot reset a password). A successful reset signs out all devices. Same error codes as OTP sign-in.
+- Internal: sign-in codes now share one service with reset codes (`otp_requests.purpose`).
+

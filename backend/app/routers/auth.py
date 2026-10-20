@@ -32,18 +32,21 @@ from app.core.security import (
 from app.core.rate_limit import client_ip, limiter
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import OtpRequest, User, UserLoginSession
+from app.models import User, UserLoginSession
 from app.schemas.auth import (
+    ForgotPasswordRequest,
     GoogleSignInRequest,
     LoginRequest,
     OtpRequestBody,
     OtpVerifyRequest,
     RefreshRequest,
+    ResetPasswordRequest,
     SignupRequest,
     TokenResponse,
 )
 from app.schemas.user import UserOut
-from app.services.email import send_otp_email
+from app.services import otp as otp_service
+from app.services.email import send_otp_email, send_password_reset_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -202,6 +205,10 @@ async def google_sign_in(body: GoogleSignInRequest, request: Request, db: AsyncS
 # OTP flow (Phase 2)
 # ---------------------------------------------------------------------------
 
+def _otp_http_error(exc: otp_service.OtpError) -> HTTPException:
+    return _api_error(exc.status_code, exc.code, exc.message)
+
+
 @router.post("/request-otp", status_code=status.HTTP_200_OK)
 async def request_otp(body: OtpRequestBody, request: Request, db: AsyncSession = Depends(get_db)):
     """Email a 6-digit one-time code to the address.
@@ -216,35 +223,10 @@ async def request_otp(body: OtpRequestBody, request: Request, db: AsyncSession =
     """
     email = body.email.strip().lower()
     _throttle(request, "otp-request", email)
-    now = datetime.now(timezone.utc)
-    ttl = timedelta(seconds=settings.OTP_TTL_SECONDS)
-
-    recent = await db.execute(
-        select(func.count(OtpRequest.id)).where(
-            OtpRequest.email == email, OtpRequest.created_at > now - ttl
-        )
-    )
-    if recent.scalar_one() >= settings.OTP_MAX_REQUESTS_PER_WINDOW:
-        raise _api_error(
-            status.HTTP_429_TOO_MANY_REQUESTS,
-            "OTP_REQUEST_LIMIT",
-            "Too many codes requested. Please wait a few minutes before asking for another.",
-        )
-
-    # Only the newest code is ever valid.
-    await db.execute(
-        update(OtpRequest).where(OtpRequest.email == email, OtpRequest.used.is_(False)).values(used=True)
-    )
-
-    raw_otp = f"{secrets.randbelow(1_000_000):06d}"
-    db.add(
-        OtpRequest(
-            email=email,
-            otp_hash=OtpRequest.hash_otp(email, raw_otp),
-            expires_at=now + ttl,
-        )
-    )
-    await db.commit()
+    try:
+        raw_otp = await otp_service.issue_code(db, email, "login")
+    except otp_service.OtpError as exc:
+        raise _otp_http_error(exc)
 
     await send_otp_email(email, raw_otp, settings.OTP_TTL_SECONDS // 60)
 
@@ -265,41 +247,10 @@ async def verify_otp(body: OtpVerifyRequest, request: Request, db: AsyncSession 
     """
     email = body.email.strip().lower()
     _throttle(request, "otp-verify", email)
-    now = datetime.now(timezone.utc)
-
-    result = await db.execute(
-        select(OtpRequest)
-        .where(OtpRequest.email == email, OtpRequest.used.is_(False))
-        .order_by(OtpRequest.created_at.desc())
-    )
-    otp_record = result.scalars().first()
-
-    if otp_record is None:
-        raise _api_error(status.HTTP_400_BAD_REQUEST, "OTP_NOT_FOUND", "No pending code for this email. Request a new one.")
-
-    if now > otp_record.expires_at:
-        raise _api_error(status.HTTP_400_BAD_REQUEST, "OTP_EXPIRED", "This code has expired. Request a new one.")
-
-    if otp_record.attempt_count >= settings.OTP_MAX_ATTEMPTS:
-        raise _api_error(
-            status.HTTP_429_TOO_MANY_REQUESTS,
-            "TOO_MANY_ATTEMPTS",
-            "Too many incorrect attempts. Request a new code.",
-        )
-
-    submitted = OtpRequest.hash_otp(email, body.otp)
-    if not hmac.compare_digest(submitted, otp_record.otp_hash):
-        otp_record.attempt_count += 1
-        await db.commit()
-        remaining = settings.OTP_MAX_ATTEMPTS - otp_record.attempt_count
-        raise _api_error(
-            status.HTTP_400_BAD_REQUEST,
-            "INVALID_OTP",
-            f"Incorrect code. {remaining} attempt(s) remaining.",
-        )
-
-    otp_record.used = True
-    await db.flush()
+    try:
+        await otp_service.consume_code(db, email, body.otp, "login")
+    except otp_service.OtpError as exc:
+        raise _otp_http_error(exc)
 
     user_result = await db.execute(select(User).where(func.lower(User.email) == email))
     user = user_result.scalar_one_or_none()
@@ -308,11 +259,61 @@ async def verify_otp(body: OtpVerifyRequest, request: Request, db: AsyncSession 
             email=email,
             password_hash=hash_password(uuid.uuid4().hex),  # unusable random password
             role="user",
+            terms_accepted_at=None,
         )
         db.add(user)
         await db.flush()
 
     return await _issue_tokens(db, user, body.device_identifier)
+
+
+# ---------------------------------------------------------------------------
+# Password reset
+# ---------------------------------------------------------------------------
+
+@router.post("/forgot-password", status_code=status.HTTP_200_OK)
+async def forgot_password(body: ForgotPasswordRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    """Email a reset code. The response (and the rate limiting) is identical
+    whether or not the account exists; the email is only sent if it does."""
+    email = body.email.strip().lower()
+    _throttle(request, "forgot", email)
+    try:
+        raw_code = await otp_service.issue_code(db, email, "reset")
+    except otp_service.OtpError as exc:
+        raise _otp_http_error(exc)
+
+    exists = (
+        await db.execute(select(User.id).where(func.lower(User.email) == email, User.deleted_at.is_(None)))
+    ).first()
+    if exists is not None:
+        await send_password_reset_email(email, raw_code, settings.OTP_TTL_SECONDS // 60)
+
+    response: dict[str, str] = {"message": "If that email has an account, a reset code is on its way."}
+    if settings.ENVIRONMENT == "development" and settings.EXPOSE_DEV_OTP:
+        response["_dev_otp"] = raw_code
+    return response
+
+
+@router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_password(body: ResetPasswordRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    """Set a new password with the emailed code. Signs the account out everywhere."""
+    email = body.email.strip().lower()
+    _throttle(request, "reset", email)
+    try:
+        await otp_service.consume_code(db, email, body.otp, "reset")
+    except otp_service.OtpError as exc:
+        raise _otp_http_error(exc)
+
+    user = (
+        await db.execute(select(User).where(func.lower(User.email) == email, User.deleted_at.is_(None)))
+    ).scalar_one_or_none()
+    if user is None:  # unreachable in practice: codes for unknown accounts are never delivered
+        raise _api_error(status.HTTP_400_BAD_REQUEST, "INVALID_OTP", "Incorrect code.")
+    user.password_hash = hash_password(body.new_password)
+    await db.execute(
+        update(UserLoginSession).where(UserLoginSession.user_id == user.id, UserLoginSession.is_active.is_(True)).values(is_active=False)
+    )
+    await db.commit()
 
 
 # ---------------------------------------------------------------------------

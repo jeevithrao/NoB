@@ -27,6 +27,8 @@ class OtpRequest(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    # What the code is for: a code issued for one purpose never works for another.
+    purpose: Mapped[str] = mapped_column(String(20), nullable=False, default="login", server_default="login")
     # HMAC-SHA256 hex digest of "<email>:<code>"
     otp_hash: Mapped[str] = mapped_column(Text, nullable=False)
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -37,7 +39,8 @@ class OtpRequest(Base):
     )
 
     @staticmethod
-    def hash_otp(email: str, otp: str) -> str:
-        """Keyed one-way hash of the code, bound to the (lower-cased) email."""
-        message = f"{email.strip().lower()}:{otp}".encode()
+    def hash_otp(email: str, otp: str, purpose: str = "login") -> str:
+        """Keyed one-way hash of the code, bound to the (lower-cased) email and the purpose."""
+        prefix = "" if purpose == "login" else f"{purpose}:"
+        message = f"{prefix}{email.strip().lower()}:{otp}".encode()
         return hmac.new(settings.SECRET_KEY.encode(), message, hashlib.sha256).hexdigest()
