@@ -8,7 +8,10 @@ from app.database import Base
 
 class User(Base):
     __tablename__ = "users"
-    __table_args__ = (CheckConstraint("role IN ('user', 'admin')", name="ck_users_role"),)
+    __table_args__ = (
+        CheckConstraint("role IN ('user', 'admin')", name="ck_users_role"),
+        CheckConstraint("username IS NULL OR username ~ '^[a-z0-9_]{3,30}$'", name="ck_users_username_format"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -21,6 +24,10 @@ class User(Base):
     # Consent evidence (DPDP): when/what version of the terms the user accepted.
     terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     terms_version: Mapped[str | None] = mapped_column(String(20))
+    username: Mapped[str | None] = mapped_column(String(30), unique=True)  # lower-case, shown as @username
+    notifications_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, server_default="true")
+    analytics_opt_in: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # set when the account is anonymised
     marketing_opt_in: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

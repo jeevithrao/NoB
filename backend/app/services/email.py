@@ -97,3 +97,16 @@ async def send_otp_email(to: str, code: str, ttl_minutes: int) -> None:
             ),
         )
     )
+
+
+async def send_password_reset_email(to: str, code: str, ttl_minutes: int) -> None:
+    await get_email_backend().send(
+        OutgoingEmail(
+            to=to,
+            subject="Reset your NoB password",
+            body=(
+                f"Your Neighbourhoods of Bangalore password reset code is {code}.\n"
+                f"It expires in {ttl_minutes} minutes. If you didn't ask for it, you can ignore this email: your password has not changed."
+            ),
+        )
+    )
