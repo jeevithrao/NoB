@@ -7,13 +7,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import Purchase, SessionEvent, Tour, TourSession, User
+from app.models import Purchase, SessionEvent, Stop, Tour, TourComment, TourLike, TourRating, TourSession, User
 from app.schemas.session import (
     SessionCreate,
     SessionEventBatchRequest,
     SessionEventBatchResponse,
+    SessionSummary,
     TourSessionOut,
 )
+from app.schemas.tour import NeighbourhoodRef
+from app.services.catalog import rating_stats
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -156,3 +159,63 @@ async def complete_session(
     await db.commit()
     await db.refresh(session)
     return session
+
+
+@router.get("/{session_id}/summary", response_model=SessionSummary)
+async def session_summary(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Everything the Walk-complete screen shows, in one call."""
+    session = await db.get(TourSession, session_id)
+    if session is None or session.user_id != current_user.id:
+        raise _api_error(status.HTTP_404_NOT_FOUND, "SESSION_NOT_FOUND", "Session not found.")
+    tour = await db.get(Tour, session.tour_id)
+
+    stop_count = (await db.execute(select(func.count()).select_from(Stop).where(Stop.tour_id == tour.id))).scalar_one()
+    avg, count = (await rating_stats(db, [tour.id])).get(tour.id, (None, 0))
+    mine = await db.get(TourRating, {"user_id": current_user.id, "tour_id": tour.id})
+    liked = await db.get(TourLike, {"user_id": current_user.id, "tour_id": tour.id}) is not None
+    commented = (
+        await db.execute(
+            select(TourComment.id).where(
+                TourComment.user_id == current_user.id, TourComment.tour_id == tour.id, TourComment.is_deleted.is_(False)
+            ).limit(1)
+        )
+    ).first() is not None
+
+    stamp_earned = False
+    if session.completed and tour.neighbourhood_id is not None:
+        earlier = await db.execute(
+            select(TourSession.id)
+            .join(Tour, Tour.id == TourSession.tour_id)
+            .where(
+                TourSession.user_id == current_user.id,
+                TourSession.completed.is_(True),
+                TourSession.id != session.id,
+                Tour.neighbourhood_id == tour.neighbourhood_id,
+                TourSession.completed_at <= session.completed_at,
+            )
+            .limit(1)
+        )
+        stamp_earned = earlier.first() is None
+
+    return SessionSummary(
+        session_id=session.id,
+        tour_id=tour.id,
+        tour_name=tour.name,
+        completed=session.completed,
+        completed_at=session.completed_at,
+        stops_visited=session.stops_visited,
+        stop_count=stop_count,
+        distance_km=float(tour.distance_km) if tour.distance_km is not None else None,
+        duration_min=tour.duration_min,
+        neighbourhood=NeighbourhoodRef.model_validate(tour.neighbourhood) if tour.neighbourhood else None,
+        stamp_earned=stamp_earned,
+        avg_rating=avg,
+        rating_count=count,
+        my_rating=mine.rating if mine else None,
+        liked=liked,
+        commented=commented,
+    )
