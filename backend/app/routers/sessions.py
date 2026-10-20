@@ -16,6 +16,7 @@ from app.schemas.session import (
     TourSessionOut,
 )
 from app.routers.tours import _BOUND_TO_OTHER_DEVICE_MSG
+from app.services import notifications
 from app.schemas.tour import NeighbourhoodRef
 from app.services.catalog import rating_stats
 
@@ -168,6 +169,10 @@ async def complete_session(
         if purchase is not None:
             purchase.is_locked = True
             purchase.locked_at = session.completed_at
+
+    tour = await db.get(Tour, session.tour_id)
+    if tour is not None:
+        await notifications.walk_completed(db, current_user.id, tour, session.id)
 
     await db.commit()
     await db.refresh(session)

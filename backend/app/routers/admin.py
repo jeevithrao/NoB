@@ -14,6 +14,7 @@ from app.models import Neighbourhood, Purchase, Stop, Tour, TourSession, User
 from app.schemas.neighbourhood import NeighbourhoodCreate, NeighbourhoodOut, NeighbourhoodUpdate
 from app.schemas.purchase import PurchaseOut
 from app.schemas.tour import StopCreate, StopOut, TourCreate, TourDetail, TourUpdate
+from app.services import notifications
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -118,7 +119,10 @@ async def publish_tour(
             status.HTTP_400_BAD_REQUEST, "NO_STOPS", "Add at least one stop before publishing a tour."
         )
 
+    first_publish = not tour.is_published
     tour.is_published = True
+    if first_publish:
+        await notifications.tour_published(db, tour)
     await db.commit()
     await db.refresh(tour)
     detail = TourDetail.model_validate(tour)

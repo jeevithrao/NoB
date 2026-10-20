@@ -14,6 +14,7 @@ from app.dependencies import get_current_user
 from app.core.security import hash_password
 from app.models import (
     Neighbourhood,
+    Notification,
     OtpRequest,
     Purchase,
     SavedTour,
@@ -266,6 +267,7 @@ async def delete_my_account(
     await db.execute(delete(TourLike).where(TourLike.user_id == uid))
     await db.execute(delete(TourRating).where(TourRating.user_id == uid))
     await db.execute(delete(SavedTour).where(SavedTour.user_id == uid))
+    await db.execute(delete(Notification).where(Notification.user_id == uid))
     await db.execute(delete(OtpRequest).where(OtpRequest.email == old_email.lower()))
     await db.execute(
         update(UserLoginSession)
