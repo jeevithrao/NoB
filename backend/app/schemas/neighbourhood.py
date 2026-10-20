@@ -14,8 +14,10 @@ class NeighbourhoodOut(ORMBase):
     city: str
     description: str | None
     cover_image: str | None
-    centroid_lat: Decimal | None
-    centroid_lng: Decimal | None
+    tagline: str | None = None
+    emoji: str | None = None
+    centroid_lat: float | None
+    centroid_lng: float | None
     tour_count: int = 0
 
 
@@ -29,6 +31,8 @@ class NeighbourhoodCreate(BaseModel):
     slug: str | None = Field(default=None, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=120)
     description: str | None = None
     cover_image: str | None = None
+    tagline: str | None = Field(default=None, max_length=255)
+    emoji: str | None = Field(default=None, max_length=16)
     centroid_lat: Decimal | None = None
     centroid_lng: Decimal | None = None
 
@@ -39,3 +43,5 @@ class NeighbourhoodUpdate(BaseModel):
     cover_image: str | None = None
     centroid_lat: Decimal | None = None
     centroid_lng: Decimal | None = None
+    tagline: str | None = Field(default=None, max_length=255)
+    emoji: str | None = Field(default=None, max_length=16)
