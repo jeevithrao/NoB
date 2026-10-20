@@ -21,6 +21,7 @@ CI runs the upgrade → downgrade → upgrade round trip and a drift test (`test
 | `0006` | frontend contract: tour `theme/difficulty/start_point/tags/preview_audio_title`, stop `blurb/icon`, neighbourhood `tagline/emoji`, `purchases.booking_ref`, user consent columns |
 | `0007` | `purchases.device_rebound_at` (self-service device move allowance) |
 | `0008` | `users.username` (unique, lower-case), `notifications_enabled`, `analytics_opt_in`, `deleted_at`; `otp_requests.purpose` |
+| `0009` | `notifications` (per-user, unique `dedupe_key` for idempotent creation) |
 
 > The pre-baseline migration chain was replaced (it diffed against a hand-applied SQL file and could not build an empty DB).
 > A local database created before `0001` must be recreated.
