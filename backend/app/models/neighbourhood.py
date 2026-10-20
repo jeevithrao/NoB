@@ -22,6 +22,8 @@ class Neighbourhood(Base):
     slug: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
     description: Mapped[str | None] = mapped_column(Text)
     cover_image: Mapped[str | None] = mapped_column(String(500))
+    tagline: Mapped[str | None] = mapped_column(String(255))
+    emoji: Mapped[str | None] = mapped_column(String(16))
     centroid_lat: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
     centroid_lng: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

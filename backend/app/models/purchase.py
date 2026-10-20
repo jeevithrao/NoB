@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Integer, Boolean, CheckConstraint, DateTime, ForeignKey, func, Index
+from sqlalchemy import String, Integer, Boolean, CheckConstraint, DateTime, ForeignKey, func, Index, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
@@ -38,6 +38,13 @@ class Purchase(Base):
     gateway_payment_id: Mapped[str | None] = mapped_column(String(255), unique=True)
     amount_paise: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False, index=True)
+    # Short human-readable reference shown on tickets and in support ("NOB-7KQ2M9XA").
+    booking_ref: Mapped[str] = mapped_column(
+        String(20),
+        unique=True,
+        nullable=False,
+        server_default=text("'NOB-' || upper(substr(md5(random()::text || clock_timestamp()::text), 1, 8))"),
+    )
     device_id: Mapped[str | None] = mapped_column(String(255))
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
