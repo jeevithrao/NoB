@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     EXPOSE_DEV_OTP: bool = False
 
     # Refund policy: full refund only if the walk never started AND within this many days of purchase.
+    TERMS_VERSION: str = "2026-10"  # bump when Terms/Privacy change materially
     REFUND_WINDOW_DAYS: int = 14
 
     # Rate limits (per client IP and per account, sliding 60s window).
