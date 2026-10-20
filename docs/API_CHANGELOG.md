@@ -46,3 +46,16 @@ Changes relative to `design/07-api-specification.md`. Newest first. Fold into th
   (all sessions are checked); refunds the payment at the gateway when real payments are on (`502 GATEWAY_ERROR`, nothing changed, safe to retry); clears the device binding.
 - **Admin** `POST /admin/neighbourhoods`, `PUT /admin/neighbourhoods/{id}`; tour create/update accept `neighbourhood_id, is_featured, gallery_images, includes, languages, preview_audio_filename`; negative prices are rejected.
 - Not supported by design: rescheduling a booking (a purchase is a one-time licence, not a time slot).
+
+### Ratings, reviews, passport, profile (feat/ratings-passport)
+- **New** `PUT /tours/{id}/rating` `{rating: 1-5}` (completed walkers only, re-rating updates) and `GET /tours/{id}/rating`
+  -> `{avg_rating, rating_count, my_rating, distribution{1..5}}`. `403 TOUR_NOT_COMPLETED` if the walk is not finished.
+- **Changed** `GET /tours` / `GET /tours/featured` items add `avg_rating`, `rating_count`; `sort=rating` added. `GET /tours/{id}` adds `my_rating`, `liked_by_me`.
+- **Changed** `POST /tours/{id}/like` now requires a completed walk (`403 TOUR_NOT_COMPLETED`); `DELETE` returns `liked: false` (was wrongly `true`).
+- **Changed** comments: max 1000 chars (`422`, previously a DB error), control characters stripped, blank rejected; `user_name` is "First L." only.
+  Hidden (unpublished) tours return `404` for like/save/rate/comment.
+- **New** `GET /reviews?tour_id=&limit=` - "What walkers say": newest comments with the author's star rating.
+- **New** `GET /me/stats` -> `{walks_completed, distance_km, stops_visited, listening_minutes, neighbourhoods_stamped}`.
+- **New** `GET /me/passport?city=` -> `{stamps_collected, total_neighbourhoods, stamps[{neighbourhood, cover_image, tours_total, tours_completed, stamped, stamped_at}]}`; stamped first.
+- **New** `GET /sessions/{id}/summary` - the Walk-complete screen in one call (`stamp_earned`, ratings, `liked`, `commented`, stats). Owner only (`404 SESSION_NOT_FOUND` otherwise).
+

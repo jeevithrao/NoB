@@ -21,7 +21,7 @@ Status legend: ⬜ todo · 🟦 in progress · ✅ done
 |---|---|---|---|
 | 4 | Razorpay order + signature-verified idempotent webhook (mock fallback) | `feat/payments` | ✅ |
 | 5 | `GET /purchases` (bookings), refund window, neighbourhood endpoints, tour search/filters | `feat/catalog-bookings` | ✅ |
-| 6 | Ratings, passport (stamps) and profile-stats endpoints | `feat/ratings-passport` | ⬜ |
+| 6 | Ratings, passport (stamps) and profile-stats endpoints | `feat/ratings-passport` | ✅ |
 | 7 | Licensing tests: duplicate purchase, replayed webhook, consumed tour, resume, kick-out, admin 403 | `test/licensing` | ⬜ |
 
 **Checkpoint 2** (`v0.2-cp2`): buy → download → walk → complete passes in tests.

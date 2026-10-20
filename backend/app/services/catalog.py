@@ -8,8 +8,20 @@ from collections.abc import Sequence
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Purchase, Tour, TourLike, TourSession, User
+from app.models import Purchase, Tour, TourLike, TourRating, TourSession, User
 from app.schemas.tour import TourListItem
+
+
+async def rating_stats(db: AsyncSession, tour_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, tuple[float, int]]:
+    """{tour_id: (average rounded to 1 decimal, number of ratings)}."""
+    if not tour_ids:
+        return {}
+    rows = await db.execute(
+        select(TourRating.tour_id, func.avg(TourRating.rating), func.count(TourRating.user_id))
+        .where(TourRating.tour_id.in_(tour_ids))
+        .group_by(TourRating.tour_id)
+    )
+    return {r[0]: (round(float(r[1]), 1), r[2]) for r in rows.all()}
 
 
 def status_for(tour: Tour, *, owned: bool, latest_session: TourSession | None, signed_in: bool) -> str:
@@ -36,6 +48,8 @@ async def to_list_items(db: AsyncSession, user: User | None, tours: Sequence[Tou
             )
         ).all()
     }
+
+    ratings = await rating_stats(db, ids)
 
     owned: set[uuid.UUID] = set()
     latest: dict[uuid.UUID, TourSession] = {}
@@ -65,5 +79,6 @@ async def to_list_items(db: AsyncSession, user: User | None, tours: Sequence[Tou
             tour, owned=tour.id in owned, latest_session=latest.get(tour.id), signed_in=user is not None
         )
         item.like_count = likes.get(tour.id, 0)
+        item.avg_rating, item.rating_count = ratings.get(tour.id, (None, 0))
         items.append(item)
     return items
