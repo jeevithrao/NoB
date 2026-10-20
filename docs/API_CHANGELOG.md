@@ -59,3 +59,8 @@ Changes relative to `design/07-api-specification.md`. Newest first. Fold into th
 - **New** `GET /me/passport?city=` -> `{stamps_collected, total_neighbourhoods, stamps[{neighbourhood, cover_image, tours_total, tours_completed, stamped, stamped_at}]}`; stamped first.
 - **New** `GET /sessions/{id}/summary` - the Walk-complete screen in one call (`stamp_earned`, ratings, `liked`, `commented`, stats). Owner only (`404 SESSION_NOT_FOUND` otherwise).
 
+### Walk lifecycle (test/licensing)
+- **Changed** `POST /sessions/{id}/events/batch`: events must reference stops of the session's own tour (`422 INVALID_STOP`).
+- Behaviour now pinned by tests: starting twice resumes; completion consumes the licence (`403 TOUR_ALREADY_COMPLETED`, `409 SESSION_LOCKED`);
+  device binding (`409 BOUND_TO_OTHER_DEVICE` on bind-device and package); kicked-out tokens get `401` while progress is kept.
+
