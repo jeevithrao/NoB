@@ -64,3 +64,23 @@ Changes relative to `design/07-api-specification.md`. Newest first. Fold into th
 - Behaviour now pinned by tests: starting twice resumes; completion consumes the licence (`403 TOUR_ALREADY_COMPLETED`, `409 SESSION_LOCKED`);
   device binding (`409 BOUND_TO_OTHER_DEVICE` on bind-device and package); kicked-out tokens get `401` while progress is kept.
 
+### Frontend contract alignment (feat/contract-alignment)
+Driven by `docs/FRONTEND_INTEGRATION.md`.
+- **Changed** `POST /auth/signup`: **requires** `accepted_terms: true`; optional `marketing_opt_in` (default false). Stores `terms_accepted_at` + `terms_version`.
+- **Changed (all endpoints)** validation errors (422) now use the standard envelope:
+  `{"error": {"code": "VALIDATION_ERROR", "message": "email: ...", "fields": {"email": "...", "password": "..."}}}` (previously FastAPI's `{"detail": [...]}`).
+- **Changed** numbers: `distance_km`, stop `lat`/`lng`, neighbourhood `centroid_lat/lng` are JSON numbers (were strings).
+- **Changed** `GET /tours` items add `theme`, `difficulty`; `neighbourhood` adds `emoji`.
+  New filters: repeatable `neighbourhood` and `theme`, `min_duration`, `max_duration` (minutes).
+- **Changed** `GET /tours/{id}` adds `start_point`, `tags[]`, `preview_audio_title`, `neighbourhood_description`,
+  `stops_preview[] = {order_index, name, blurb, icon}` (public teaser: never narration, audio or coordinates).
+- **Changed** `GET /tours/{id}/package` stops add `blurb`, `icon`; `lat`/`lng` numeric.
+- **Changed** `POST /purchases` on a **free** tour now creates a completed 0-paise purchase (`gateway_config = {"free": true}`);
+  previously `400 TOUR_IS_FREE`. Repeat -> `409 TOUR_ALREADY_OWNED`. Free walks appear in My Bookings, can be cancelled (refund endpoint) before starting, and follow the one-playback rule.
+  Walking a free tour without a claim still works.
+- **Changed** bookings (`GET /purchases`) add `booking_ref` ("NOB-7KQ2M9XA"), `completed_at`, `my_rating`, `tour.theme`. `PurchaseOut` adds `booking_ref`.
+- **Changed** `GET /me/passport?include_empty=true` (default): areas without a walk are listed as locked slots; each stamp adds `emoji`, `walk_name` (first walk completed there).
+- **Changed** `GET /me/stats` adds `reviews_count` (ratings given).
+- **Admin** tour create/update accept `theme, difficulty (Easy|Moderate|Hard), start_point, tags, preview_audio_title`; stop create accepts `blurb, icon`; neighbourhoods accept `tagline, emoji`.
+- **Seed data** now mirrors the frontend: 4 walks, 12 neighbourhoods (8 locked passport slots). Coordinates, narration and tags are placeholders.
+
