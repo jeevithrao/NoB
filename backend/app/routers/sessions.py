@@ -97,6 +97,14 @@ async def submit_events_batch(
     if not body.events:
         return SessionEventBatchResponse(accepted=0, duplicate=0, session=session)
 
+    # Events may only reference stops of this session's own tour; otherwise a
+    # client could inflate stops_visited with stops from another walk.
+    valid_stops = set(
+        (await db.execute(select(Stop.id).where(Stop.tour_id == session.tour_id))).scalars().all()
+    )
+    if any(event.stop_id not in valid_stops for event in body.events):
+        raise _api_error(status.HTTP_422_UNPROCESSABLE_ENTITY, "INVALID_STOP", "Event references a stop that is not part of this tour.")
+
     incoming_ids = [event.client_event_id for event in body.events]
     existing_result = await db.execute(
         select(SessionEvent.client_event_id).where(SessionEvent.client_event_id.in_(incoming_ids))
