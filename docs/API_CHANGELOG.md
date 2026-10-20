@@ -84,3 +84,13 @@ Driven by `docs/FRONTEND_INTEGRATION.md`.
 - **Admin** tour create/update accept `theme, difficulty (Easy|Moderate|Hard), start_point, tags, preview_audio_title`; stop create accepts `blurb, icon`; neighbourhoods accept `tagline, emoji`.
 - **Seed data** now mirrors the frontend: 4 walks, 12 neighbourhoods (8 locked passport slots). Coordinates, narration and tags are placeholders.
 
+### Device recovery (feat/device-recovery)
+- **New** `POST /purchases/{id}/rebind-device {device_identifier}` - moves a purchase bound to an old/lost/cleared device to the device the user is signed in on.
+  The target must be the device of the current login (`400 DEVICE_MISMATCH`); only while the walk can still be played (`409 TOUR_ALREADY_COMPLETED`);
+  one move per `REBIND_COOLDOWN_DAYS` (30) (`409 REBIND_COOLDOWN`, message gives the date). Binding an unbound purchase or "moving" to the same device is free.
+  Walk progress is kept (sessions belong to the user, not the device).
+- **Changed** `GET /purchases` rows add `device_status` (`unbound | this_device | other_device`) and `rebind_available_at` (set only while the cooldown runs).
+  Show "Use on this device" when `device_status == "other_device"` and `rebind_available_at` is null.
+- **Changed** `POST /sessions` now returns `409 BOUND_TO_OTHER_DEVICE` when the purchase is bound to a different device than the current login.
+- **Changed** the `BOUND_TO_OTHER_DEVICE` message points to My Bookings instead of "re-download".
+
