@@ -12,3 +12,4 @@ from app.models.tour_comment import TourComment
 from app.models.tour_rating import TourRating
 from app.models.otp_request import OtpRequest
 from app.models.payment_event import PaymentEvent
+from app.models.notification import Notification
