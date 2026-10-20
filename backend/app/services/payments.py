@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models import Purchase
+from app.services import notifications
 
 logger = logging.getLogger("nob.payments")
 
@@ -175,6 +176,7 @@ async def apply_payment_result(
             return "ignored"
         purchase.status = "completed"
         purchase.gateway_payment_id = payment_id
+        await notifications.purchase_confirmed(db, purchase)
         return "completed"
 
     # failure

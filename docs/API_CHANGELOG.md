@@ -106,3 +106,12 @@ Driven by `docs/FRONTEND_INTEGRATION.md`.
   and are bound to their purpose (a sign-in code cannot reset a password). A successful reset signs out all devices. Same error codes as OTP sign-in.
 - Internal: sign-in codes now share one service with reset codes (`otp_requests.purpose`).
 
+### Notifications (feat/notifications)
+In-app only (no push in v1). Created automatically, idempotently, and skipped for users who turned notifications off (`PATCH /me/preferences`).
+- **New** `GET /me/notifications?limit=50&unread_only=false` -> `{unread_count, items[{id, type, title, subtitle, tour_id, is_read, created_at}]}`, newest first.
+  `unread_count` covers all notifications (drives the bell dot), not just the page.
+- **New** `POST /me/notifications/{id}/read` (returns the item), `POST /me/notifications/read-all` (204), `DELETE /me/notifications/{id}` (204, the swipe-to-dismiss). `404 NOTIFICATION_NOT_FOUND` also for other people's ids.
+- Types: `confirmed` ("You're in!", on purchase completed incl. free claims and verified payments, once per purchase), `review` ("How was your walk?", when a walk is completed, once per walk),
+  `new` ("New walk: <name>", subtitle "Malleshwaram · 2.3km · ₹249", sent to all walkers when an admin first publishes a tour), `reminder` (reserved; needs a scheduler, not generated yet).
+- Account deletion erases a user's notifications.
+

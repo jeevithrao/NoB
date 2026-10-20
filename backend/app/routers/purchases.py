@@ -15,6 +15,7 @@ from app.database import get_db
 from app.dependencies import get_current_user, get_login_device
 from app.models import PaymentEvent, Purchase, Stop, Tour, TourRating, TourSession, User
 from app.routers.tours import _BOUND_TO_OTHER_DEVICE_MSG
+from app.services import notifications
 from app.schemas.purchase import (
     BindDeviceRequest,
     BookingOut,
@@ -60,6 +61,7 @@ async def _claim_free_tour(db: AsyncSession, user: User, tour: Tour) -> Purchase
             await db.flush()
     except IntegrityError:
         raise _api_error(status.HTTP_409_CONFLICT, "TOUR_ALREADY_OWNED", "You already own this tour.")
+    await notifications.purchase_confirmed(db, purchase)
     await db.commit()
     return PurchaseCreateResponse(
         purchase_id=purchase.id, status="completed", gateway_order_id=None, gateway_config={"free": True}
@@ -106,6 +108,7 @@ async def create_purchase(
         purchase.gateway_order_id = purchase.gateway_order_id or f"mock_order_{uuid.uuid4().hex[:16]}"
         purchase.gateway_payment_id = f"mock_payment_{uuid.uuid4().hex[:16]}"
         purchase.status = "completed"
+        await notifications.purchase_confirmed(db, purchase)
         await db.commit()
         return PurchaseCreateResponse(
             purchase_id=purchase.id,

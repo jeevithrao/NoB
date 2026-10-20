@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.routers import admin, auth, me, media, neighbourhoods, purchases, sessions, social, tours
+from app.routers import admin, auth, me, media, neighbourhoods, notifications, purchases, sessions, social, tours
 
 app = FastAPI(
     title="NoB \u2014 Neighbourhoods of Bengaluru",
@@ -64,6 +64,7 @@ app.include_router(auth.router)
 app.include_router(tours.router)
 app.include_router(neighbourhoods.router)
 app.include_router(me.router)
+app.include_router(notifications.router)
 app.include_router(purchases.router)
 app.include_router(sessions.router)
 app.include_router(social.router)
