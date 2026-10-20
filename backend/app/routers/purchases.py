@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, get_login_device
 from app.models import PaymentEvent, Purchase, Stop, Tour, TourRating, TourSession, User
 from app.routers.tours import _BOUND_TO_OTHER_DEVICE_MSG
 from app.schemas.purchase import (
@@ -23,6 +23,7 @@ from app.schemas.purchase import (
     PurchaseCreate,
     PurchaseCreateResponse,
     PurchaseOut,
+    RebindDeviceRequest,
 )
 from app.services import payments
 
@@ -153,11 +154,27 @@ def _refund_block_reason(purchase: Purchase, sessions: list[TourSession], now: d
     return None
 
 
+def _device_status(purchase: Purchase, login_device: str) -> str:
+    if purchase.device_id is None:
+        return "unbound"
+    return "this_device" if purchase.device_id == login_device else "other_device"
+
+
+def _rebind_available_at(purchase: Purchase, login_device: str, now: datetime) -> datetime | None:
+    """When the user may next move this purchase to the device they are on
+    (None = can move now, or there is nothing to move)."""
+    if _device_status(purchase, login_device) != "other_device" or purchase.device_rebound_at is None:
+        return None
+    available = purchase.device_rebound_at + timedelta(days=settings.REBIND_COOLDOWN_DAYS)
+    return available if available > now else None
+
+
 @router.get("/purchases", response_model=list[BookingOut])
 async def list_my_purchases(
     tab: Literal["upcoming", "past", "all"] = Query(default="all"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    login_device: str = Depends(get_login_device),
 ):
     """"My Bookings". upcoming = bought and not yet finished (not started or in
     progress); past = finished walks and refunded purchases. Pending/failed
@@ -235,6 +252,8 @@ async def list_my_purchases(
                 completed_at=latest.completed_at if latest and latest.completed else None,
                 my_rating=my_ratings.get(purchase.tour_id),
                 device_bound=purchase.device_id is not None,
+                device_status=_device_status(purchase, login_device),
+                rebind_available_at=_rebind_available_at(purchase, login_device, now),
                 can_refund=refundable,
                 refund_deadline=_refund_deadline(purchase) if refundable else None,
             )
@@ -313,6 +332,51 @@ async def bind_device(
         )
 
     purchase.device_id = body.device_identifier
+    await db.commit()
+    await db.refresh(purchase)
+    return purchase
+
+
+@router.post("/purchases/{purchase_id}/rebind-device", response_model=PurchaseOut)
+async def rebind_device(
+    purchase_id: uuid.UUID,
+    body: RebindDeviceRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    login_device: str = Depends(get_login_device),
+):
+    """Recovery path: move a purchase bound to an old/lost/cleared device to the
+    device the user is signed in on now.
+
+      - the target must be the device of the current login session (400 DEVICE_MISMATCH)
+      - only for a walk that can still be played (409 TOUR_ALREADY_COMPLETED if consumed)
+      - at most once per REBIND_COOLDOWN_DAYS (409 REBIND_COOLDOWN)
+    Moving to the device it is already on, or binding an unbound purchase, is
+    free and never uses up the allowance.
+    """
+    purchase = await _owned_purchase(db, purchase_id, current_user, lock=True)
+    if purchase.status != "completed":
+        raise _api_error(status.HTTP_400_BAD_REQUEST, "PURCHASE_NOT_COMPLETED", "Purchase isn't completed yet.")
+    if body.device_identifier != login_device:
+        raise _api_error(
+            status.HTTP_400_BAD_REQUEST, "DEVICE_MISMATCH", "You can only move a walk to the device you are signed in on."
+        )
+    if purchase.is_locked:
+        raise _api_error(status.HTTP_409_CONFLICT, "TOUR_ALREADY_COMPLETED", "This walk has already been completed.")
+
+    if purchase.device_id is None or purchase.device_id == body.device_identifier:
+        purchase.device_id = body.device_identifier  # plain bind, no allowance used
+    else:
+        now = datetime.now(timezone.utc)
+        available = _rebind_available_at(purchase, login_device, now)
+        if available is not None:
+            raise _api_error(
+                status.HTTP_409_CONFLICT,
+                "REBIND_COOLDOWN",
+                f"You moved this walk recently. You can move it again after {available.date().isoformat()}.",
+            )
+        purchase.device_id = body.device_identifier
+        purchase.device_rebound_at = now
     await db.commit()
     await db.refresh(purchase)
     return purchase

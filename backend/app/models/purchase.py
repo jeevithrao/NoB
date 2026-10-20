@@ -46,6 +46,7 @@ class Purchase(Base):
         server_default=text("'NOB-' || upper(substr(md5(random()::text || clock_timestamp()::text), 1, 8))"),
     )
     device_id: Mapped[str | None] = mapped_column(String(255))
+    device_rebound_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # last self-service move
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
