@@ -12,11 +12,14 @@ class ProfileStats(BaseModel):
     stops_visited: int
     listening_minutes: int
     neighbourhoods_stamped: int
+    reviews_count: int  # ratings the user has given
 
 
 class PassportStamp(BaseModel):
     neighbourhood: NeighbourhoodRef
     cover_image: str | None
+    emoji: str | None = None
+    walk_name: str | None = None  # the first walk completed here (back of the stamp)
     tours_total: int
     tours_completed: int
     stamped: bool

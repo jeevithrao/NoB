@@ -15,6 +15,7 @@ class PurchaseCreate(BaseModel):
 
 class PurchaseOut(ORMBase):
     id: uuid.UUID
+    booking_ref: str
     tour_id: uuid.UUID
     status: str
     amount_paise: int
@@ -29,6 +30,7 @@ class BookingTour(ORMBase):
     cover_image: str | None
     duration_min: int | None
     distance_km: float | None = None
+    theme: str | None = None
     neighbourhood: NeighbourhoodRef | None = None
 
 
@@ -36,6 +38,7 @@ class BookingOut(BaseModel):
     """One row of "My Bookings"."""
 
     purchase_id: uuid.UUID
+    booking_ref: str
     status: Literal["completed", "refunded"]
     amount_paise: int
     purchased_at: datetime
@@ -44,6 +47,8 @@ class BookingOut(BaseModel):
     stops_visited: int
     stop_count: int
     session_id: uuid.UUID | None = None
+    completed_at: datetime | None = None
+    my_rating: int | None = None  # None = not reviewed yet
     device_bound: bool
     can_refund: bool
     refund_deadline: datetime | None = None
