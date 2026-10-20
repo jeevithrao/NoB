@@ -59,6 +59,7 @@ async def seed() -> None:
 
             tour_data = copy.deepcopy(tour_data)
             stops_data = tour_data.pop("stops")
+            tour_data.pop("preview_text", None)  # only used by the audio generator
             hood = hoods[tour_data.pop("neighbourhood")]
             tour = Tour(**tour_data, neighbourhood_id=hood.id, is_published=True)
             db.add(tour)

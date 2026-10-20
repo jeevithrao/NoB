@@ -25,11 +25,19 @@ def generate_stop_audio(text: str, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     wav_path = output_path.with_suffix(".wav")
 
-    subprocess.run(
-        ["espeak-ng", "-v", "en-us+f3", "-s", "165", "-w", str(wav_path), text],
-        check=True,
-        capture_output=True,
-    )
+    if shutil.which("espeak-ng"):
+        subprocess.run(
+            ["espeak-ng", "-v", "en-us+f3", "-s", "165", "-w", str(wav_path), text],
+            check=True,
+            capture_output=True,
+        )
+    else:
+        # No TTS available: a short tone keeps the download/playback pipeline testable.
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=330:duration=6", str(wav_path)],
+            check=True,
+            capture_output=True,
+        )
     subprocess.run(
         ["ffmpeg", "-y", "-loglevel", "error", "-i", str(wav_path), "-codec:a", "libmp3lame", "-qscale:a", "4", str(output_path)],
         check=True,
@@ -39,14 +47,18 @@ def generate_stop_audio(text: str, output_path: Path) -> None:
 
 
 def main() -> None:
-    for tool in ("espeak-ng", "ffmpeg"):
-        if shutil.which(tool) is None:
-            print(f"Missing dependency: {tool}. Install it (e.g. `apt-get install {tool}`) and retry.")
-            sys.exit(1)
+    if shutil.which("ffmpeg") is None:
+        print("Missing dependency: ffmpeg. Install it (e.g. `apt-get install ffmpeg`) and retry.")
+        sys.exit(1)
+    if shutil.which("espeak-ng") is None:
+        print("espeak-ng not found: generating a plain tone instead of speech (placeholder only).")
 
     audio_root = Path(settings.AUDIO_DIR)
     count = 0
     for tour in TOURS:
+        if tour.get("preview_audio_filename"):
+            generate_stop_audio(tour["preview_text"], audio_root / tour["preview_audio_filename"])
+            count += 1
         for stop in tour["stops"]:
             output_path = audio_root / stop["audio_filename"]
             generate_stop_audio(stop["narrative_text"], output_path)
