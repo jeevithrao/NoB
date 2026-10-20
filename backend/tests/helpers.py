@@ -17,7 +17,7 @@ async def signup(client, email: str | None = None, password: str = "correct-hors
     device = device or new_device()
     resp = await client.post(
         "/auth/signup",
-        json={"email": email, "password": password, "full_name": "Test Walker", "device_identifier": device},
+        json={"email": email, "password": password, "full_name": "Test Walker", "device_identifier": device, "accepted_terms": True},
     )
     assert resp.status_code == 201, resp.text
     body = resp.json()

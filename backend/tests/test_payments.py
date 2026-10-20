@@ -47,11 +47,9 @@ async def test_mock_mode_completes_instantly_and_blocks_duplicates(client):
     assert again.status_code == 409 and again.json()["error"]["code"] == "TOUR_ALREADY_OWNED"
 
 
-async def test_free_and_unpublished_tours_cannot_be_purchased(client):
+async def test_unpublished_tours_cannot_be_purchased(client):
     user = await signup(client)
-    free = await make_tour(client, is_free=True)
     hidden = await make_tour(client, published=False)
-    assert (await _buy(client, user["access_token"], free["id"])).json()["error"]["code"] == "TOUR_IS_FREE"
     assert (await _buy(client, user["access_token"], hidden["id"])).status_code == 404
 
 

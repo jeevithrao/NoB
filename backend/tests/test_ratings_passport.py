@@ -205,7 +205,7 @@ async def test_stats_zero_for_new_user_and_requires_login(client):
     body = (await client.get("/me/stats", headers=auth(user["access_token"]))).json()
     assert body == {
         "walks_completed": 0, "distance_km": 0.0, "stops_visited": 0,
-        "listening_minutes": 0, "neighbourhoods_stamped": 0,
+        "listening_minutes": 0, "neighbourhoods_stamped": 0, "reviews_count": 0,
     }
 
 

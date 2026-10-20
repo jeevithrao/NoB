@@ -188,7 +188,7 @@ async def test_email_matching_is_case_insensitive(client):
     assert resp.status_code == 200
     dup = await client.post(
         "/auth/signup",
-        json={"email": "MIXEDCASE@nobtests.com", "password": "correct-horse-1", "device_identifier": "d"},
+        json={"email": "MIXEDCASE@nobtests.com", "password": "correct-horse-1", "device_identifier": "d", "accepted_terms": True},
     )
     assert dup.status_code == 409
 

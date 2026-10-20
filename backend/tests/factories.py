@@ -7,9 +7,9 @@ from app.models import Neighbourhood, Stop, Tour, User
 from tests.helpers import login, new_device, new_email
 
 
-async def make_neighbourhood(client, name: str = "Malleshwaram") -> Neighbourhood:
+async def make_neighbourhood(client, name: str = "Malleshwaram", **fields) -> Neighbourhood:
     async with client.session_factory() as db:
-        hood = Neighbourhood(name=name, slug=name.lower().replace(" ", "-") + "-" + uuid.uuid4().hex[:4])
+        hood = Neighbourhood(name=name, slug=name.lower().replace(" ", "-") + "-" + uuid.uuid4().hex[:4], **fields)
         db.add(hood)
         await db.commit()
         await db.refresh(hood)
