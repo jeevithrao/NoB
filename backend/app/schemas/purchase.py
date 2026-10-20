@@ -3,7 +3,7 @@ from datetime import datetime
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.common import ORMBase
 from app.schemas.tour import NeighbourhoodRef
@@ -50,6 +50,8 @@ class BookingOut(BaseModel):
     completed_at: datetime | None = None
     my_rating: int | None = None  # None = not reviewed yet
     device_bound: bool
+    device_status: Literal["unbound", "this_device", "other_device"]
+    rebind_available_at: datetime | None = None  # set while the move cooldown is running
     can_refund: bool
     refund_deadline: datetime | None = None
 
@@ -66,6 +68,10 @@ class PurchaseCreateResponse(BaseModel):
 
 class BindDeviceRequest(BaseModel):
     device_identifier: str
+
+
+class RebindDeviceRequest(BaseModel):
+    device_identifier: str = Field(min_length=1, max_length=255)
 
 
 class CheckoutVerifyRequest(BaseModel):

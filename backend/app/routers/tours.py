@@ -17,8 +17,8 @@ router = APIRouter(prefix="/tours", tags=["tours"])
 # Shared with purchases.py via import — single source of truth for the copy
 # shown when a device-binding conflict is detected.
 _BOUND_TO_OTHER_DEVICE_MSG = (
-    "This tour was downloaded on another device. Re-download here to move it — "
-    "your other device will need to sign in again to use it."
+    "This walk is set up on another device. Move it to this device from My Bookings "
+    "(you can do this once every 30 days)."
 )
 
 

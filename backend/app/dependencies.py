@@ -21,10 +21,9 @@ def _auth_error(detail: str, code: str = "UNAUTHORIZED") -> HTTPException:
     )
 
 
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-    db: AsyncSession = Depends(get_db),
-) -> User:
+async def _resolve_auth(
+    credentials: HTTPAuthorizationCredentials | None, db: AsyncSession
+) -> tuple[User, UserLoginSession]:
     if credentials is None:
         raise _auth_error("Missing bearer token.")
 
@@ -63,7 +62,22 @@ async def get_current_user(
     if user is None:
         raise _auth_error("User not found.")
 
-    return user
+    return user, login_session
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    return (await _resolve_auth(credentials, db))[0]
+
+
+async def get_login_device(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> str:
+    """The device the caller signed in on (their one active login session)."""
+    return (await _resolve_auth(credentials, db))[1].device_id
 
 
 async def get_current_user_optional(

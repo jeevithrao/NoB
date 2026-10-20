@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, get_login_device
 from app.models import Purchase, SessionEvent, Stop, Tour, TourComment, TourLike, TourRating, TourSession, User
 from app.schemas.session import (
     SessionCreate,
@@ -15,6 +15,7 @@ from app.schemas.session import (
     SessionSummary,
     TourSessionOut,
 )
+from app.routers.tours import _BOUND_TO_OTHER_DEVICE_MSG
 from app.schemas.tour import NeighbourhoodRef
 from app.services.catalog import rating_stats
 
@@ -30,6 +31,7 @@ async def create_or_resume_session(
     body: SessionCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    login_device: str = Depends(get_login_device),
 ):
     tour = await db.get(Tour, body.tour_id)
     if tour is None or not tour.is_published:
@@ -61,6 +63,11 @@ async def create_or_resume_session(
             "TOUR_ALREADY_COMPLETED",
             "This tour's one playback has already been used. Purchase again to replay it.",
         )
+
+    # A purchase bound to another device can't be walked from this one (Business
+    # Rules 3a). The user can move it from My Bookings (POST .../rebind-device).
+    if purchase is not None and purchase.device_id is not None and purchase.device_id != login_device:
+        raise _api_error(status.HTTP_409_CONFLICT, "BOUND_TO_OTHER_DEVICE", _BOUND_TO_OTHER_DEVICE_MSG)
 
     # Resume the existing in-progress walk rather than starting a new row —
     # interruptions (GPS loss, crash, dead battery) never consume the license.
