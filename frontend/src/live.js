@@ -139,3 +139,19 @@ export async function prepareAudio(stops, onProgress = () => {}) {
   }
   return out
 }
+
+// Google Identity Services, loaded on demand (only when VITE_GOOGLE_CLIENT_ID is set).
+let gsi = null
+export const GOOGLE_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
+export function loadGoogle() {
+  if (window.google && window.google.accounts) return Promise.resolve(window.google)
+  if (!gsi) {
+    gsi = new Promise((resolve, reject) => {
+      const s = document.createElement('script')
+      s.src = 'https://accounts.google.com/gsi/client'; s.async = true
+      s.onload = () => resolve(window.google); s.onerror = () => { gsi = null; reject(new Error('google script')) }
+      document.head.appendChild(s)
+    })
+  }
+  return gsi
+}

@@ -3,7 +3,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { walks, neighbourhoods, passportSlots, bookingsData, notificationsData, reviews } from './data'
 import { REMOTE, WIKI, localPhoto, wikiImage, altFor } from './images'
-import { LIVE, api, profile, hydrateCatalog, hydrateUser, clearUserData, onSessionEnded, friendlyError, downloadJson, uid, lastWalk, prepareAudio } from './live'
+import { LIVE, api, profile, hydrateCatalog, hydrateUser, clearUserData, onSessionEnded, friendlyError, downloadJson, uid, lastWalk, prepareAudio, GOOGLE_ID, loadGoogle } from './live'
 import { User, Search, Bell, Home as HomeIcon, Compass, Settings as SettingsIcon, ArrowLeft, Eye, EyeOff, MapPin, Smartphone, CreditCard, Star, X, Lock, Play, Pause, Ticket, BookOpen, Download, Heart, MessageCircle, Map as MapIcon, CheckCircle2, Pencil, Trash2, FileText, Wallet, Mail, Info, LogOut, BarChart3, ChevronRight, WifiOff, Footprints, Languages, Activity, RotateCcw, RotateCw, Crosshair, Maximize2 } from 'lucide-react'
 const Ic = ({ i: I, size = 18 }) => <I size={size} strokeWidth={1.8} aria-hidden="true" />
 
@@ -277,7 +277,7 @@ function Signup({ go, onAuthed }) {
             <FormError msg={err} />
             <button className="btn-primary" onClick={submit} disabled={busy} aria-busy={busy}>{busy ? 'Creating account…' : 'Create account → Enable location'}</button>
             <div className="or-row"><div className="or-line" /><span className="or-label">or</span><div className="or-line" /></div>
-            <button className="social-btn"><span style={{ fontWeight: 800, fontFamily: 'sans-serif' }}>G</span> Continue with Google</button>
+            <GoogleBtn go={go} onAuthed={onAuthed} dest="location-prime" />
           </div>
         </div>
       </div>
@@ -311,15 +311,153 @@ function Login({ go, onAuthed, notice }) {
           {notice && <div className="pay-error" role="status" style={{ marginBottom: 10 }}><span>{notice}</span></div>}
           <Field label="Email address" type="email" placeholder="you@email.com" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} />
           <Field label="Password">{id => <PwField id={id} placeholder="••••••••" autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} />}</Field>
-          <div style={{ textAlign: 'right', marginBottom: 16 }}><span {...press(() => {})} style={{ fontSize: 12, color: 'var(--rust)', ...mono, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', minHeight: 44 }}>Forgot password?</span></div>
+          <div style={{ textAlign: 'right', marginBottom: 16 }}><span {...press(() => go('forgot'))} style={{ fontSize: 12, color: 'var(--rust)', ...mono, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', minHeight: 44 }}>Forgot password?</span></div>
           <FormError msg={err} />
           <button className="btn-primary" onClick={submit} disabled={busy} aria-busy={busy} style={{ marginBottom: 10 }}>{busy ? 'Signing in…' : 'Sign in → Explore'}</button>
           <div className="or-row"><div className="or-line" /><span className="or-label">or</span><div className="or-line" /></div>
-          <button className="social-btn"><span style={{ fontWeight: 800, fontFamily: 'sans-serif' }}>G</span> Continue with Google</button>
-          <button className="social-btn"> Sign in with OTP</button>
+          <GoogleBtn go={go} onAuthed={onAuthed} dest="home" />
+          <button className="social-btn" onClick={() => go('otp')}> Sign in with OTP</button>
           <div className="signup-link">New here? <a {...press(() => go('signup'))}>Create an account →</a></div>
         </div>
         <button className="explore-btn-big" onClick={() => go('home')}> {LIVE ? 'Browse walks without signing in' : 'Go to Explore'}</button>
+      </div>
+    </Phone>
+  )
+}
+
+const GBadge = <span style={{ fontWeight: 800, fontFamily: 'sans-serif' }}>G</span>
+function GoogleBtn({ go, onAuthed, dest }) {
+  const ref = useRef(null)
+  const [err, setErr] = useState('')
+  const real = LIVE && !!GOOGLE_ID
+  useEffect(() => {
+    if (!real) return
+    let dead = false
+    loadGoogle().then(g => {
+      if (dead || !ref.current) return
+      g.accounts.id.initialize({ client_id: GOOGLE_ID, callback: async r => {
+        try { await api.auth.google(r.credential); await onAuthed(); go(dest) } catch (e) { setErr(friendlyError(e)) }
+      } })
+      g.accounts.id.renderButton(ref.current, { theme: 'outline', size: 'large', text: 'continue_with', width: 300 })
+    }).catch(() => setErr("We couldn't load Google sign-in."))
+    return () => { dead = true }
+  }, [])
+  return (
+    <>
+      {real
+        ? <div ref={ref} style={{ display: 'flex', justifyContent: 'center', minHeight: 44 }} />
+        : <button className="social-btn" onClick={() => { if (LIVE) setErr("Google sign-in isn't set up yet. Please use your email for now.") }}>{GBadge} Continue with Google</button>}
+      <FormError msg={err} />
+    </>
+  )
+}
+
+// Sign in with a one-time code emailed to the user
+function OtpLogin({ go, onAuthed }) {
+  const [step, setStep] = useState('email')
+  const [email, setEmail] = useState('')
+  const [code, setCode] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const send = async () => {
+    if (!LIVE) return setStep('code')
+    if (!email.trim()) return setErr('Enter your email address.')
+    setErr(''); setBusy(true)
+    try {
+      const r = await api.auth.requestOtp(email.trim())
+      if (r && r._dev_otp) setCode(r._dev_otp)   // only present when the server runs in development mode
+      setStep('code')
+    } catch (e) { setErr(friendlyError(e)) } finally { setBusy(false) }
+  }
+  const verify = async () => {
+    if (!LIVE) return go('location-prime')
+    if (!/^\d{6}$/.test(code)) return setErr('Enter the 6-digit code from your email.')
+    setErr(''); setBusy(true)
+    try { await api.auth.verifyOtp({ email: email.trim(), code }); await onAuthed(); go('home') }
+    catch (e) { setErr(friendlyError(e)) } finally { setBusy(false) }
+  }
+  return (
+    <Phone caption="Sign in with a code">
+      <div className="screen">
+        <div className="login-hero">
+          <div className="back" {...press(() => go('login'))}>← Back to sign in</div>
+          <h1>Sign in with<br />a one-time code.</h1>
+        </div>
+        <div style={{ padding: '20px 18px 0', flex: 1, overflowY: 'auto' }}>
+          {step === 'email' ? (
+            <>
+              <Field label="Email address" type="email" placeholder="you@email.com" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} />
+              <FormError msg={err} />
+              <button className="btn-primary" onClick={send} disabled={busy} aria-busy={busy}>{busy ? 'Sending…' : 'Email me a code'}</button>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 13, color: 'var(--text-soft)', marginBottom: 12 }}>If {email || 'that email'} can receive codes, a 6-digit code is on its way. It expires in a few minutes.</div>
+              <Field label="6-digit code" placeholder="123456" autoComplete="one-time-code" inputMode="numeric" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} onKeyDown={e => e.key === 'Enter' && verify()} />
+              <FormError msg={err} />
+              <button className="btn-primary" onClick={verify} disabled={busy} aria-busy={busy} style={{ marginBottom: 8 }}>{busy ? 'Checking…' : 'Sign in'}</button>
+              <button className="btn-ghost" onClick={() => { setStep('email'); setErr('') }}>Use a different email</button>
+            </>
+          )}
+        </div>
+      </div>
+    </Phone>
+  )
+}
+
+// Reset a forgotten password with an emailed code
+function ForgotPassword({ go, setNotice }) {
+  const [step, setStep] = useState('email')
+  const [email, setEmail] = useState('')
+  const [code, setCode] = useState('')
+  const [pw, setPw] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const send = async () => {
+    if (!LIVE) return setStep('reset')
+    if (!email.trim()) return setErr('Enter your email address.')
+    setErr(''); setBusy(true)
+    try {
+      const r = await api.auth.forgotPassword(email.trim())
+      if (r && r._dev_otp) setCode(r._dev_otp)
+      setStep('reset')
+    } catch (e) { setErr(friendlyError(e)) } finally { setBusy(false) }
+  }
+  const reset = async () => {
+    if (!LIVE) { setNotice('Password updated. Sign in with your new password.'); return go('login') }
+    if (!/^\d{6}$/.test(code)) return setErr('Enter the 6-digit code from your email.')
+    if (pw.length < 8) return setErr('Your new password needs at least 8 characters.')
+    setErr(''); setBusy(true)
+    try {
+      await api.auth.resetPassword({ email: email.trim(), code, newPassword: pw })
+      setNotice('Password updated. Sign in with your new password.')
+      go('login')
+    } catch (e) { setErr(friendlyError(e)) } finally { setBusy(false) }
+  }
+  return (
+    <Phone caption="Forgot password">
+      <div className="screen">
+        <div className="login-hero">
+          <div className="back" {...press(() => go('login'))}>← Back to sign in</div>
+          <h1>Reset your<br />password.</h1>
+        </div>
+        <div style={{ padding: '20px 18px 0', flex: 1, overflowY: 'auto' }}>
+          {step === 'email' ? (
+            <>
+              <Field label="Email address" type="email" placeholder="you@email.com" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} />
+              <FormError msg={err} />
+              <button className="btn-primary" onClick={send} disabled={busy} aria-busy={busy}>{busy ? 'Sending…' : 'Email me a reset code'}</button>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 13, color: 'var(--text-soft)', marginBottom: 12 }}>If {email || 'that email'} has an account, a reset code is on its way.</div>
+              <Field label="6-digit code" placeholder="123456" autoComplete="one-time-code" inputMode="numeric" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} />
+              <Field label="New password">{id => <PwField id={id} placeholder="Min. 8 characters" autoComplete="new-password" value={pw} onChange={e => setPw(e.target.value)} onKeyDown={e => e.key === 'Enter' && reset()} />}</Field>
+              <FormError msg={err} />
+              <button className="btn-primary" onClick={reset} disabled={busy} aria-busy={busy}>{busy ? 'Saving…' : 'Set new password'}</button>
+            </>
+          )}
+        </div>
       </div>
     </Phone>
   )
@@ -867,6 +1005,21 @@ function Bookings({ go, startWalk }) {
     try { await api.purchases.rebindDevice(b.id); await hydrateUser(); setData({ upcoming: [...bookingsData.upcoming], past: [...bookingsData.past] }); setMoveErr('') }
     catch (e) { setMoveErr(friendlyError(e, "We couldn't move this walk to this device.")) }
   }
+  const [reviewFor, setReviewFor] = useState(null)
+  const [rv, setRv] = useState({ stars: 0, text: '', err: '', busy: false })
+  const openReview = b => { setRv({ stars: 0, text: '', err: '', busy: false }); setReviewFor(b) }
+  const sendReview = async () => {
+    if (!rv.stars) return setRv(x => ({ ...x, err: 'Tap a star to rate this walk.' }))
+    if (!LIVE) { setData(d => ({ ...d, past: d.past.map(x => (x.id === reviewFor.id ? { ...x, reviewed: true } : x)) })); setReviewFor(null); return }
+    setRv(x => ({ ...x, busy: true, err: '' }))
+    try {
+      await api.social.rate(reviewFor.tourId, rv.stars)
+      if (rv.text.trim()) await api.social.comment(reviewFor.tourId, rv.text.trim())
+      await hydrateUser()
+      setData({ upcoming: [...bookingsData.upcoming], past: [...bookingsData.past] })
+      setReviewFor(null)
+    } catch (e) { setRv(x => ({ ...x, busy: false, err: friendlyError(e) })) }
+  }
   const readyText = b => b.validUntil ? 'Valid until ' + b.validUntil : 'Ready to start any time'
   const list = data[tab]
   useDialog(cancelRef, !!cancelId, () => setCancelId(null))
@@ -884,7 +1037,25 @@ function Bookings({ go, startWalk }) {
         </div>
   )
   return (
-    <Phone tab="bookings" go={go} caption="My bookings — ready to walk & completed" overlay={cancelSheet}>
+    <Phone tab="bookings" go={go} caption="My bookings — ready to walk & completed" overlay={<>{cancelSheet}{reviewFor && (
+      <div className="cancel-sheet-overlay show">
+        <div className="cancel-sheet" role="dialog" aria-modal="true" aria-labelledby="rv-title" tabIndex={-1}>
+          <div className="cancel-title" id="rv-title">How was {reviewFor.walkName}?</div>
+          <div role="radiogroup" aria-label="Your rating" style={{ display: 'flex', gap: 4, justifyContent: 'center', margin: '4px 0 10px' }}>
+            {[1, 2, 3, 4, 5].map(n => (
+              <button key={n} type="button" role="radio" aria-checked={rv.stars === n} aria-label={`${n} star${n > 1 ? 's' : ''}`} onClick={() => setRv(x => ({ ...x, stars: n }))}
+                style={{ background: 'none', border: 0, fontSize: 30, lineHeight: 1, minWidth: 44, minHeight: 44, cursor: 'pointer', color: rv.stars >= n ? 'var(--rust)' : 'var(--text-soft)' }}>{rv.stars >= n ? '★' : '☆'}</button>
+            ))}
+          </div>
+          <textarea className="field" aria-label="Your comment (optional)" placeholder="Add a comment (optional)" maxLength={500} rows={3} value={rv.text} onChange={e => setRv(x => ({ ...x, text: e.target.value }))} style={{ marginBottom: 10, resize: 'none' }} />
+          {rv.err && <div className="pay-error" role="alert" style={{ marginBottom: 10 }}><span>{rv.err}</span></div>}
+          <div style={{ display: 'flex', gap: 9 }}>
+            <button className="btn-ghost" style={{ flex: 1 }} onClick={() => setReviewFor(null)}>Not now</button>
+            <button className="btn-primary" style={{ flex: 1 }} onClick={sendReview} disabled={rv.busy}>{rv.busy ? 'Sending…' : 'Send'}</button>
+          </div>
+        </div>
+      </div>
+    )}</>}>
       <div className="screen">
         <div className="bookings-hdr"><h1>My Bookings</h1></div>
         <div className="tabs-wrap" role="tablist" aria-label="Bookings">
@@ -934,7 +1105,7 @@ function Bookings({ go, startWalk }) {
                   ) : (
                     <>
                       <button className="ticket-action-btn primary" onClick={() => go('explore')}>More walks</button>
-                      {!b.reviewed && <button className="ticket-action-btn">Leave review</button>}
+                      {!b.reviewed && <button className="ticket-action-btn" onClick={() => openReview(b)}>Leave review</button>}
                     </>
                   )}
                 </div>
@@ -1515,7 +1686,7 @@ function Settings({ go }) {
 
 /* ───────── APP / PROTOTYPE NAV ───────── */
 const NAV = [
-  ['splash', '🎧 Splash'], ['about', 'About'], ['signup', 'Sign Up'], ['login', 'Login'], ['location-prime', '📍 Location'], '|',
+  ['splash', '🎧 Splash'], ['about', 'About'], ['signup', 'Sign Up'], ['login', 'Login'], ['otp', 'OTP'], ['forgot', 'Forgot'], ['location-prime', '📍 Location'], '|',
   ['home', 'Home'], ['explore', '🔍 Explore'], ['walk-detail', 'Walk Detail'], ['bookings', '🎟 Bookings'], ['passport', '📖 Passport'],
   ['neighbourhood', '🗺 Neighbourhood'], ['notifications', '🔔 Notifications'], '|',
   ['walk', 'Active Walk'], ['complete', 'Complete'], ['profile', 'Profile'], ['settings', 'Settings'],
@@ -1572,6 +1743,8 @@ export default function App() {
     about: <About go={go} />,
     signup: <Signup go={go} onAuthed={onAuthed} />,
     login: <Login go={go} onAuthed={onAuthed} notice={notice} />,
+    otp: <OtpLogin go={go} onAuthed={onAuthed} />,
+    forgot: <ForgotPassword go={go} setNotice={setNotice} />,
     'location-prime': <LocationPrime go={go} />,
     home: <Home go={go} openNb={openNb} startWalk={startWalk} />,
     explore: <Explore go={go} openWalk={openWalk} />,
