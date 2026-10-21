@@ -33,3 +33,4 @@ Set `VITE_API_URL` (copy `.env.example` to `.env`) and the app loads real data f
 - Wired: sign up, log in, log out, catalogue, walk detail with real audio sample, buy (mock payments), bookings, cancel, move to this device, passport, notifications, profile, settings (preferences, export, delete).
 - Not wired yet: walking screen, rating/comment, OTP, Google sign-in, forgot password, Razorpay checkout.
 - Walking (live): downloads and caches every stop's audio, plays real audio, advances on arriving inside a stop's trigger radius (or "Next stop"), batches `arrived` / `audio_started` / `audio_finished` events, keeps the screen awake, and completes the walk with rating, like and comment on the finish screen. Ending early asks for confirmation, because a completed walk cannot be replayed.
+- PWA: installable, offline app shell, cached walk audio. See `../docs/PHONE.md`. The service worker only registers in production builds (`npm run build`).
