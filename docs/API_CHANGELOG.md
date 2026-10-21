@@ -115,3 +115,8 @@ In-app only (no push in v1). Created automatically, idempotently, and skipped fo
   `new` ("New walk: <name>", subtitle "Malleshwaram · 2.3km · ₹249", sent to all walkers when an admin first publishes a tour), `reminder` (reserved; needs a scheduler, not generated yet).
 - Account deletion erases a user's notifications.
 
+
+## Integration kit
+- `docs/openapi.json`: exported contract (55 paths), guarded by a snapshot test.
+- `docs/frontend-kit/api.js` + `smoke.mjs`: reference client and a 35-step journey verified against the live API.
+- `docs/INTEGRATION.md`: local run steps.
