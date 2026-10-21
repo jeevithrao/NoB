@@ -34,7 +34,8 @@ spec doc.
 
 ```bash
 # 1. Postgres (either docker-compose from repo root, or a local install)
-docker compose up -d
+# (needs DB_PASSWORD in the repo-root .env: copy .env.example there first)
+docker compose up -d db
 
 # 2. Python env
 cd backend
