@@ -3,6 +3,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { walks, neighbourhoods, passportSlots, bookingsData, notificationsData, reviews } from './data'
 import { REMOTE, WIKI, localPhoto, wikiImage, altFor } from './images'
+import { LIVE, api, profile, hydrateCatalog, hydrateUser, clearUserData, onSessionEnded, friendlyError, downloadJson } from './live'
 import { User, Search, Bell, Home as HomeIcon, Compass, Settings as SettingsIcon, ArrowLeft, Eye, EyeOff, MapPin, Smartphone, CreditCard, Star, X, Lock, Play, Pause, Ticket, BookOpen, Download, Heart, MessageCircle, Map as MapIcon, CheckCircle2, Pencil, Trash2, FileText, Wallet, Mail, Info, LogOut, BarChart3, ChevronRight, WifiOff, Footprints, Languages, Activity, RotateCcw, RotateCw, Crosshair, Maximize2 } from 'lucide-react'
 const Ic = ({ i: I, size = 18 }) => <I size={size} strokeWidth={1.8} aria-hidden="true" />
 
@@ -133,7 +134,7 @@ const Phone = ({ caption, children, overlay, tab, go }) => (
 
 const Reviews = ({ list }) =>
   list.map(r => (
-    <div className="rcard" key={r.name}>
+    <div className="rcard" key={r.id || r.name}>
       <div className="rheader">
         <div className="ravatar" style={{ background: r.color }}>{r.name[0]}</div>
         <div><div className="rname">{r.name}</div><div className="rtour">{r.tour}</div></div>
@@ -154,11 +155,11 @@ function Field({ label, type = 'text', placeholder, autoComplete, children, ...r
   )
 }
 
-function PwField({ id, placeholder, autoComplete }) {
+function PwField({ id, placeholder, autoComplete, ...rest }) {
   const [show, setShow] = useState(false)
   return (
     <div className="pw-wrap">
-      <input id={id} className="field" type={show ? 'text' : 'password'} placeholder={placeholder} autoComplete={autoComplete} />
+      <input id={id} className="field" type={show ? 'text' : 'password'} placeholder={placeholder} autoComplete={autoComplete} {...rest} />
       <button className="pw-toggle" type="button" aria-label={show ? 'Hide password' : 'Show password'} aria-pressed={show} onClick={() => setShow(s => !s)}>{show ? <Ic i={EyeOff} /> : <Ic i={Eye} />}</button>
     </div>
   )
@@ -238,7 +239,26 @@ function About({ go }) {
 }
 
 /* ───────── SIGN UP / LOGIN ───────── */
-function Signup({ go }) {
+const FormError = ({ msg }) => msg ? <div className="pay-error" role="alert" style={{ marginBottom: 10 }}><span>{msg}</span></div> : null
+
+function Signup({ go, onAuthed }) {
+  const [f, setF] = useState({ name: '', email: '', pw: '', pw2: '', tos: false, mkt: false })
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const set = k => e => setF(x => ({ ...x, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }))
+  const submit = async () => {
+    if (!LIVE) return go('location-prime')
+    if (!f.email.trim() || !f.pw) return setErr('Enter your email and a password.')
+    if (f.pw.length < 8) return setErr('Your password needs at least 8 characters.')
+    if (f.pw !== f.pw2) return setErr('The two passwords do not match.')
+    if (!f.tos) return setErr('Please accept the Terms of Service and Privacy Policy to continue.')
+    setErr(''); setBusy(true)
+    try {
+      await api.auth.signup({ email: f.email.trim(), password: f.pw, fullName: f.name.trim() || undefined, acceptedTerms: f.tos, marketingOptIn: f.mkt })
+      await onAuthed()
+      go('location-prime')
+    } catch (e) { setErr(friendlyError(e)) } finally { setBusy(false) }
+  }
   return (
     <Phone caption="Sign up">
       <div className="screen">
@@ -247,14 +267,15 @@ function Signup({ go }) {
           <h1>Create your<br />account.</h1>
         </div>
         <div style={{ padding: '18px 18px 0', flex: 1, overflowY: 'auto' }}>
-          <Field label="Full name" placeholder="Priya Sharma" autoComplete="name" />
-          <Field label="Email address" type="email" placeholder="priya@email.com" autoComplete="email" />
-          <Field label="Password">{id => <PwField id={id} placeholder="Min. 8 characters" autoComplete="new-password" />}</Field>
-          <Field label="Confirm password">{id => <PwField id={id} placeholder="Repeat password" autoComplete="new-password" />}</Field>
-          <div className="consent-row"><input type="checkbox" id="consentTos" /><label htmlFor="consentTos">I agree to the <a>Terms of Service</a> and <a>Privacy Policy</a></label></div>
-          <div className="consent-row" style={{ borderTop: 'none', paddingTop: 4 }}><input type="checkbox" id="consentMarketing" /><label htmlFor="consentMarketing">Send me updates about new tours and neighbourhoods (optional)</label></div>
+          <Field label="Full name" placeholder="Priya Sharma" autoComplete="name" value={f.name} onChange={set('name')} />
+          <Field label="Email address" type="email" placeholder="priya@email.com" autoComplete="email" value={f.email} onChange={set('email')} />
+          <Field label="Password">{id => <PwField id={id} placeholder="Min. 8 characters" autoComplete="new-password" value={f.pw} onChange={set('pw')} />}</Field>
+          <Field label="Confirm password">{id => <PwField id={id} placeholder="Repeat password" autoComplete="new-password" value={f.pw2} onChange={set('pw2')} />}</Field>
+          <div className="consent-row"><input type="checkbox" id="consentTos" checked={f.tos} onChange={set('tos')} /><label htmlFor="consentTos">I agree to the <a>Terms of Service</a> and <a>Privacy Policy</a></label></div>
+          <div className="consent-row" style={{ borderTop: 'none', paddingTop: 4 }}><input type="checkbox" id="consentMarketing" checked={f.mkt} onChange={set('mkt')} /><label htmlFor="consentMarketing">Send me updates about new tours and neighbourhoods (optional)</label></div>
           <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8, paddingBottom: 24 }}>
-            <button className="btn-primary" onClick={() => go('location-prime')}>Create account → Enable location</button>
+            <FormError msg={err} />
+            <button className="btn-primary" onClick={submit} disabled={busy} aria-busy={busy}>{busy ? 'Creating account…' : 'Create account → Enable location'}</button>
             <div className="or-row"><div className="or-line" /><span className="or-label">or</span><div className="or-line" /></div>
             <button className="social-btn"><span style={{ fontWeight: 800, fontFamily: 'sans-serif' }}>G</span> Continue with Google</button>
           </div>
@@ -264,7 +285,21 @@ function Signup({ go }) {
   )
 }
 
-function Login({ go }) {
+function Login({ go, onAuthed, notice }) {
+  const [email, setEmail] = useState('')
+  const [pw, setPw] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const submit = async () => {
+    if (!LIVE) return go('location-prime')
+    if (!email.trim() || !pw) return setErr('Enter your email and password.')
+    setErr(''); setBusy(true)
+    try {
+      await api.auth.login({ email: email.trim(), password: pw })
+      await onAuthed()
+      go('home')
+    } catch (e) { setErr(friendlyError(e)) } finally { setBusy(false) }
+  }
   return (
     <Phone caption="Login">
       <div className="screen">
@@ -273,16 +308,18 @@ function Login({ go }) {
           <h1>Welcome back.<br />Sign in to walk.</h1>
         </div>
         <div style={{ padding: '20px 18px 0', flex: 1, overflowY: 'auto' }}>
-          <Field label="Email address" type="email" placeholder="you@email.com" autoComplete="email" />
-          <Field label="Password">{id => <PwField id={id} placeholder="••••••••" autoComplete="current-password" />}</Field>
+          {notice && <div className="pay-error" role="status" style={{ marginBottom: 10 }}><span>{notice}</span></div>}
+          <Field label="Email address" type="email" placeholder="you@email.com" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} />
+          <Field label="Password">{id => <PwField id={id} placeholder="••••••••" autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} />}</Field>
           <div style={{ textAlign: 'right', marginBottom: 16 }}><span {...press(() => {})} style={{ fontSize: 12, color: 'var(--rust)', ...mono, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', minHeight: 44 }}>Forgot password?</span></div>
-          <button className="btn-primary" onClick={() => go('location-prime')} style={{ marginBottom: 10 }}>Sign in → Explore</button>
+          <FormError msg={err} />
+          <button className="btn-primary" onClick={submit} disabled={busy} aria-busy={busy} style={{ marginBottom: 10 }}>{busy ? 'Signing in…' : 'Sign in → Explore'}</button>
           <div className="or-row"><div className="or-line" /><span className="or-label">or</span><div className="or-line" /></div>
           <button className="social-btn"><span style={{ fontWeight: 800, fontFamily: 'sans-serif' }}>G</span> Continue with Google</button>
           <button className="social-btn"> Sign in with OTP</button>
           <div className="signup-link">New here? <a {...press(() => go('signup'))}>Create an account →</a></div>
         </div>
-        <button className="explore-btn-big" onClick={() => go('home')}> Go to Explore</button>
+        <button className="explore-btn-big" onClick={() => go('home')}> {LIVE ? 'Browse walks without signing in' : 'Go to Explore'}</button>
       </div>
     </Phone>
   )
@@ -382,8 +419,19 @@ function Sheet({ walk, onClose, onStart }) {
   useEffect(() => { const r = requestAnimationFrame(() => setShow(true)); return () => cancelAnimationFrame(r) }, [])
   const close = cb => { setShow(false); setTimeout(() => (cb || onClose)(), 400) }
   const to = p => { setPanel(p); if (sheetRef.current) sheetRef.current.scrollTop = 0 }
-  const pay = () => {
+  const pay = async () => {
     if (!navigator.onLine) { setPayErr("You're offline, so we couldn't take the payment. Check your connection and try again. You haven't been charged."); return }
+    if (LIVE) {
+      if (!api.isSignedIn()) { setPayErr('Please sign in to get this walk.'); return }
+      setPayErr(''); setPaying(true)
+      try {
+        const b = await api.purchases.buy(walk.id)
+        if (b.status !== 'completed') throw Object.assign(new Error('Online payments are not switched on yet.'), { status: 400 })
+        await api.purchases.bindDevice(b.purchase_id).catch(e => console.warn('bind-device', e))
+        setPaying(false); to('paid')
+      } catch (e) { setPaying(false); setPayErr(friendlyError(e, "We couldn't complete the purchase. You have not been charged.")) }
+      return
+    }
     setPayErr(''); setPaying(true)
     setTimeout(() => { if (!navigator.onLine) { setPaying(false); setPayErr('The connection dropped before the payment finished. You have not been charged. Please try again.'); return } setPaying(false); to('paid') }, 1800)
   }
@@ -561,7 +609,7 @@ function Home({ go, openNb, startWalk }) {
           <div className="stack-label" style={{ marginBottom: 10 }}>By neighbourhood</div>
           <div className="nbhood-strip">
             {neighbourhoods.map(nb => (
-              <div className="nbhood-chip" key={nb.slug} {...press(() => openNb(nb), `${nb.name} neighbourhood`)}>
+              <div className="nbhood-chip" key={nb?.slug} {...press(() => openNb(nb), `${nb.name} neighbourhood`)}>
                 <div className="nbhood-chip-img" style={{ background: nb.bg }}>
                   <Photo slug={nb.slug} fallback={nb.emoji} />
                 </div>
@@ -674,13 +722,32 @@ function WalkDetail({ walk: w, go, onStart }) {
   const [playing, setPlaying] = useState(false)
   const [prog, setProg] = useState(0)
   const [booking, setBooking] = useState(false)
+  const audioRef = useRef(null)
+  const [dur, setDur] = useState(15)
+  const realSample = LIVE && !!w.sampleUrl
+  useEffect(() => () => { if (audioRef.current) audioRef.current.pause() }, [])
   useEffect(() => {
-    if (!playing) return
+    if (!playing || realSample) return
     const t = setInterval(() => setProg(p => (p + 100 / 15 >= 100 ? 0 : p + 100 / 15)), 1000)
     return () => clearInterval(t)
   }, [playing])
-  const toggle = () => { if (playing) { setPlaying(false); setProg(0) } else setPlaying(true) }
-  const elapsed = Math.round((prog / 100) * 15)
+  const toggle = () => {
+    if (realSample) {
+      if (!audioRef.current) {
+        const a = new Audio(api.mediaUrl(w.sampleUrl))
+        a.onended = () => { setPlaying(false); setProg(0) }
+        a.ontimeupdate = () => setProg(a.duration ? (a.currentTime / a.duration) * 100 : 0)
+        a.onloadedmetadata = () => setDur(Math.round(a.duration) || 15)
+        a.onerror = () => setPlaying(false)
+        audioRef.current = a
+      }
+      if (playing) { audioRef.current.pause(); setPlaying(false) }
+      else audioRef.current.play().then(() => setPlaying(true)).catch(() => setPlaying(false))
+      return
+    }
+    if (playing) { setPlaying(false); setProg(0) } else setPlaying(true)
+  }
+  const elapsed = Math.round((prog / 100) * dur)
   const eq = [6, 11, 8, 14, 5]
   const walkReviews = reviews.filter(r => r.walkId === w.id)
   return (
@@ -695,7 +762,7 @@ function WalkDetail({ walk: w, go, onStart }) {
           <div className="detail-hero-content">
             <div className="detail-title">{w.t}</div>
             <div className="detail-subtitle">{w.tag} · {w.distance} · {w.duration}</div>
-            <div className="detail-rating"><span className="stars" aria-hidden="true">{w.stars}</span><span>{w.rating} ({w.reviewCount} reviews)</span></div>
+            <div className="detail-rating"><span className="stars" aria-hidden="true">{w.stars}</span><span>{w.reviewCount ? `${w.rating} (${w.reviewCount} reviews)` : 'No ratings yet'}</span></div>
           </div>
         </div>
 
@@ -713,13 +780,13 @@ function WalkDetail({ walk: w, go, onStart }) {
         <div className="detail-section">
           <div className="detail-sect-label">Listen to a sample</div>
           <div className="audio-sample-card">
-            <div className="audio-sample-title">{w.sample.title}</div>
+            <div className="audio-sample-title">{(w.sample || {}).title || 'Audio sample'}</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <button className="play-btn" aria-label={playing ? 'Pause sample' : 'Play sample'} onClick={toggle}>{playing ? <Ic i={Pause} size={20} /> : <Ic i={Play} size={20} />}</button>
               <div className={cx('equalizer', !playing && 'paused')}>{eq.map((h, i) => <div key={i} className="eq-bar" style={{ height: h }} />)}</div>
               <div style={{ flex: 1 }}>
                 <div className="audio-prog"><div className="audio-prog-fill" style={{ width: prog + '%', animation: 'none' }} /></div>
-                <div className="audio-times"><span>0:{String(elapsed).padStart(2, '0')}</span><span>0:15</span></div>
+                <div className="audio-times"><span>0:{String(elapsed).padStart(2, '0')}</span><span>0:{String(dur).padStart(2, '0')}</span></div>
               </div>
             </div>
           </div>
@@ -786,11 +853,21 @@ function Bookings({ go, startWalk }) {
   const cancelRef = useRef(null)
   const [ul, setUl] = useState({ left: 0, width: 0 })
   useLayoutEffect(() => { const b = refs[tab].current; if (b) setUl({ left: b.offsetLeft, width: b.offsetWidth }) }, [tab])
-  const confirm = () => {
+  const [cancelErr, setCancelErr] = useState('')
+  const confirm = async () => {
     const id = cancelId
-    setCancelId(null); setCollapsing(id)
+    if (LIVE) {
+      try { await api.purchases.cancel(id) } catch (e) { setCancelErr(friendlyError(e, "We couldn't cancel this booking.")); return }
+    }
+    setCancelErr(''); setCancelId(null); setCollapsing(id)
     setTimeout(() => { setData(d => ({ ...d, upcoming: d.upcoming.filter(b => b.id !== id) })); setCollapsing(null) }, 320)
   }
+  const [moveErr, setMoveErr] = useState('')
+  const moveHere = async b => {
+    try { await api.purchases.rebindDevice(b.id); await hydrateUser(); setData({ upcoming: [...bookingsData.upcoming], past: [...bookingsData.past] }); setMoveErr('') }
+    catch (e) { setMoveErr(friendlyError(e, "We couldn't move this walk to this device.")) }
+  }
+  const readyText = b => b.validUntil ? 'Valid until ' + b.validUntil : 'Ready to start any time'
   const list = data[tab]
   useDialog(cancelRef, !!cancelId, () => setCancelId(null))
   const cancelSheet = (
@@ -798,8 +875,9 @@ function Bookings({ go, startWalk }) {
           <div className="cancel-sheet" ref={cancelRef} role="dialog" aria-modal="true" aria-labelledby="cancel-title" aria-describedby="cancel-body" tabIndex={-1}>
             <div className="cancel-title" id="cancel-title">Cancel booking?</div>
             <div className="cancel-body" id="cancel-body">This will cancel your walk. You'll receive a full refund within 5–7 business days, as the walk hasn't started yet.</div>
+            {cancelErr && <div className="pay-error" role="alert" style={{ marginBottom: 10 }}><span>{cancelErr}</span></div>}
             <div style={{ display: 'flex', gap: 9 }}>
-              <button className="btn-ghost" style={{ flex: 1 }} onClick={() => setCancelId(null)}>Keep it</button>
+              <button className="btn-ghost" style={{ flex: 1 }} onClick={() => { setCancelId(null); setCancelErr('') }}>Keep it</button>
               <button className="btn-primary" style={{ flex: 1, background: 'var(--error)' }} onClick={confirm}>Yes, cancel</button>
             </div>
           </div>
@@ -814,6 +892,7 @@ function Bookings({ go, startWalk }) {
           <button ref={refs.past} role="tab" aria-selected={tab === 'past'} className={cx('tab-btn', tab === 'past' && 'active')} onClick={() => setTab('past')}>Completed</button>
           <div className="tab-underline" style={ul} />
         </div>
+        {moveErr && <div className="pay-error" role="alert" style={{ margin: '0 16px 8px' }}><span>{moveErr}</span></div>}
         <div className="tab-content">
           <div className="tab-pane active" key={tab} role="tabpanel">
             {!list.length ? (
@@ -832,7 +911,7 @@ function Bookings({ go, startWalk }) {
                   <div className="ticket-info">
                     <div className="ticket-walk-name">{b.walkName}</div>
                     <div className="ticket-meta">{b.neighbourhood}</div>
-                    <div className="ticket-date">{tab === 'upcoming' ? `Valid until ${b.validUntil}` : `Walked ${b.walkedOn}`}</div>
+                    <div className="ticket-date">{tab === 'upcoming' ? readyText(b) : `Walked ${b.walkedOn}`}</div>
                     <div className="ticket-tap-hint">Tap to {tab === 'upcoming' ? 'expand QR' : 'view details'}</div>
                   </div>
                   <div style={{ fontSize: 13, ...mono, fontWeight: 700 }}>{b.price}</div>
@@ -841,13 +920,15 @@ function Bookings({ go, startWalk }) {
                 <div className="ticket-qr-section">
                   <div className="ticket-qr-inner">
                     <QR id={b.id} />
-                    <div className="ticket-id">BOOKING ID<br /><strong>{b.id}</strong><br />{tab === 'upcoming' ? `Valid until ${b.validUntil}` : `Walked ${b.walkedOn}`}<br />{b.neighbourhood}</div>
+                    <div className="ticket-id">BOOKING ID<br /><strong>{b.ref || b.id}</strong><br />{tab === 'upcoming' ? readyText(b) : `Walked ${b.walkedOn}`}<br />{b.neighbourhood}</div>
                   </div>
                 </div>
                 <div className="ticket-actions">
                   {tab === 'upcoming' ? (
                     <>
-                      {walks.some(w => w.t === b.walkName) && <button className="ticket-action-btn primary" onClick={() => startWalk(walks.find(w => w.t === b.walkName))}>Start walk</button>}
+                      {b.deviceStatus === 'other_device'
+                        ? <button className="ticket-action-btn primary" onClick={() => moveHere(b)}>Use on this device</button>
+                        : walks.some(w => w.t === b.walkName) && <button className="ticket-action-btn primary" onClick={() => startWalk(walks.find(w => w.t === b.walkName))}>{b.walkStatus === 'in_progress' ? 'Resume walk' : 'Start walk'}</button>}
                       <button className="ticket-action-btn danger" onClick={() => setCancelId(b.id)}>Cancel</button>
                     </>
                   ) : (
@@ -958,8 +1039,9 @@ function Notifications({ go }) {
   itemsRef.current = items
   const sim = useRef(100)
   const touchX = useRef(0)
-  useEffect(() => { const t = setTimeout(() => setFaded(new Set(itemsRef.current.map(n => n.id))), 1500); return () => clearTimeout(t) }, [])
+  useEffect(() => { const t = setTimeout(() => { setFaded(new Set(itemsRef.current.map(n => n.id))); if (LIVE) api.notifications.markAllRead().catch(() => {}) }, 1500); return () => clearTimeout(t) }, [])
   const dismiss = id => {
+    if (LIVE) api.notifications.dismiss(id).catch(() => {})
     setLeaving(s => new Set(s).add(id))
     setTimeout(() => setItems(l => l.filter(n => n.id !== id)), 350)
   }
@@ -979,8 +1061,9 @@ function Notifications({ go }) {
       <div className="notif-time">{n.time}</div>
     </div>
   )
-  const today = items.filter(n => TODAY.includes(n.time))
-  const earlier = items.filter(n => !TODAY.includes(n.time))
+  const isToday = n => (n.today ?? TODAY.includes(n.time))
+  const today = items.filter(isToday)
+  const earlier = items.filter(n => !isToday(n))
   return (
     <Phone caption="Notifications — unread dots · swipe dismiss">
       <div className="screen">
@@ -996,7 +1079,7 @@ function Notifications({ go }) {
           {!!today.length && <><div className="notif-group-label">Today</div>{today.map(row)}</>}
           {!!earlier.length && <><div className="notif-group-label">Earlier</div>{earlier.map(row)}</>}
         </div>
-        <button className="notif-sim-btn" onClick={simulate}>+ Simulate new notification arriving</button>
+        {!LIVE && <button className="notif-sim-btn" onClick={simulate}>+ Simulate new notification arriving</button>}
       </div>
     </Phone>
   )
@@ -1184,7 +1267,13 @@ function Complete({ walk: w, go, toPassport }) {
 
 /* ───────── PROFILE ───────── */
 function Profile({ go, toPassport }) {
-  const [initial, setInitial] = useState('P')
+  const [initial, setInitial] = useState(LIVE && profile.user ? ((profile.user.full_name || profile.user.email || '?')[0]).toUpperCase() : 'P')
+  const [saveMsg, setSaveMsg] = useState('')
+  const save = async patch => {
+    if (!LIVE) return
+    try { profile.user = await api.me.update(patch); setSaveMsg('Saved') } catch (e) { setSaveMsg(friendlyError(e, "We couldn't save that.")) }
+  }
+  const st = LIVE && profile.stats ? [[String(profile.stats.walks_completed), 'Walks'], [String(profile.stats.distance_km), 'km'], [String(profile.stats.reviews_count), 'Reviews']] : [['7', 'Walks'], ['14.2', 'km'], ['3', 'Reviews']]
   const entry = (icon, title, sub, onClick) => (
     <div className="profile-entry-row" {...press(onClick, sub ? `${title}, ${sub}` : title)}>
       <div className="sleft"><span className="sicon">{icon}</span><div><div className="stitle">{title}</div>{sub && <div className="ssub" style={{ fontSize: 11, color: 'var(--text-soft)' }}>{sub}</div>}</div></div>
@@ -1197,14 +1286,15 @@ function Profile({ go, toPassport }) {
         <div className="profile-hero"><h1>Your Profile</h1></div>
         <div style={{ position: 'relative' }}><div className="avatar-ring" role="img" aria-label={`Profile picture, initial ${initial}`}>{initial}<div className="avatar-edit"><Ic i={Pencil} size={13} /></div></div></div>
         <div className="profile-stats">
-          {[['7', 'Walks'], ['14.2', 'km'], ['3', 'Reviews']].map(([v, k]) => <div className="pstat" key={k}><div className="pv">{v}</div><div className="pk">{k}</div></div>)}
+          {st.map(([v, k]) => <div className="pstat" key={k}><div className="pv">{v}</div><div className="pk">{k}</div></div>)}
         </div>
         <div className="pform">
-          <Field label="Full name" placeholder="Priya Sharma" autoComplete="name" onChange={e => setInitial(e.target.value.trim()[0] ? e.target.value.trim()[0].toUpperCase() : '?')} />
-          <Field label="Username" placeholder="@priya_walks" autoComplete="username" />
-          <Field label="Email address" type="email" placeholder="priya@email.com" autoComplete="email" />
+          <Field label="Full name" placeholder="Priya Sharma" autoComplete="name" defaultValue={LIVE && profile.user ? profile.user.full_name || '' : undefined} onBlur={e => save({ fullName: e.target.value.trim() })} onChange={e => setInitial(e.target.value.trim()[0] ? e.target.value.trim()[0].toUpperCase() : '?')} />
+          <Field label="Username" placeholder="@priya_walks" autoComplete="username" defaultValue={LIVE && profile.user && profile.user.username ? '@' + profile.user.username : undefined} onBlur={e => e.target.value.trim() && save({ username: e.target.value.trim() })} />
+          <Field label="Email address" type="email" placeholder="priya@email.com" autoComplete="email" readOnly={LIVE} defaultValue={LIVE && profile.user ? profile.user.email : undefined} />
+          {saveMsg && <div className="pay-error" role="status" style={{ marginTop: 8 }}><span>{saveMsg}</span></div>}
         </div>
-        {entry(<Ic i={BookOpen} />, 'My Passport', '3 of 12 stamps collected', () => toPassport(false))}
+        {entry(<Ic i={BookOpen} />, 'My Passport', `${passportSlots.filter(x => x.collected).length} of ${passportSlots.length} stamps collected`, () => toPassport(false))}
         {entry(<Ic i={Ticket} />, 'My Bookings', null, () => go('bookings'))}
         {entry(<Ic i={SettingsIcon} />, 'Settings', 'Privacy, location, legal', () => go('settings'))}
         <div className="tab-spacer" />
@@ -1214,9 +1304,9 @@ function Profile({ go, toPassport }) {
 }
 
 /* ───────── SETTINGS ───────── */
-function Toggle({ on: init, label }) {
+function Toggle({ on: init, label, onChange }) {
   const [on, setOn] = useState(!!init)
-  return <button type="button" role="switch" aria-checked={on} aria-label={label} className={cx('toggle', on && 'on')} onClick={() => setOn(o => !o)} />
+  return <button type="button" role="switch" aria-checked={on} aria-label={label} className={cx('toggle', on && 'on')} onClick={() => { const n = !on; setOn(n); if (onChange) onChange(n) }} />
 }
 const Row = ({ icon, title, sub, danger, right, onClick, expanded }) => (
   <div className={cx('srow', danger && 'danger')} {...(onClick ? press(onClick, sub ? `${title}, ${sub}` : title) : {})} aria-expanded={expanded}>
@@ -1226,20 +1316,30 @@ const Row = ({ icon, title, sub, danger, right, onClick, expanded }) => (
 )
 function Settings({ go }) {
   const [credits, setCredits] = useState(false)
+  const [msg, setMsg] = useState('')
+  const pref = patch => { if (LIVE) api.me.preferences(patch).then(u => { profile.user = u }).catch(e => setMsg(friendlyError(e))) }
+  const signOut = async () => { try { if (LIVE) await api.auth.logout() } catch (_) {} clearUserData(); go('splash') }
+  const exportData = async () => { if (!LIVE) return; try { downloadJson(await api.me.exportData(), 'nob-my-data.json'); setMsg('Your data was downloaded.') } catch (e) { setMsg(friendlyError(e)) } }
+  const deleteAccount = async () => {
+    if (!LIVE) return
+    if (!window.confirm('Delete your account? This is permanent and cannot be undone.')) return
+    try { await api.me.deleteAccount(); clearUserData(); go('splash') } catch (e) { setMsg(friendlyError(e)) }
+  }
   return (
     <Phone caption="Settings">
       <div className="screen">
         <div className="settings-hero"><div className="back" {...press(() => go('profile'))}>← Profile</div><h1>Settings</h1></div>
+        {msg && <div className="pay-error" role="status" style={{ margin: '0 16px 10px' }}><span>{msg}</span></div>}
         <div className="settings-section">
           <h2>Location</h2>
           <Row icon={<Ic i={MapPin} />} title="GPS tracking" sub="Required for audio triggers" right={<Toggle on label="GPS tracking" />} />
-          <Row icon={<Ic i={Bell} />} title="Notifications" sub="Walk reminders & updates" right={<Toggle label="Notifications" />} />
+          <Row icon={<Ic i={Bell} />} title="Notifications" sub="Walk reminders & updates" right={<Toggle label="Notifications" on={LIVE ? !!(profile.user && profile.user.notifications_enabled) : false} onChange={n => pref({ notificationsEnabled: n })} />} />
         </div>
         <div className="settings-section" style={{ marginTop: 12 }}>
           <h2>Privacy &amp; Preferences</h2>
-          <Row icon={<Ic i={BarChart3} />} title="Analytics sharing" sub="Help improve the app (opt-in)" right={<Toggle label="Analytics sharing" />} />
-          <Row icon={<Ic i={Download} />} title="Download my data" />
-          <Row icon={<Ic i={Trash2} />} title="Delete my account" sub="Permanent — cannot be undone" danger />
+          <Row icon={<Ic i={BarChart3} />} title="Analytics sharing" sub="Help improve the app (opt-in)" right={<Toggle label="Analytics sharing" on={LIVE ? !!(profile.user && profile.user.analytics_opt_in) : false} onChange={n => pref({ analyticsOptIn: n })} />} />
+          <Row icon={<Ic i={Download} />} title="Download my data" onClick={exportData} />
+          <Row icon={<Ic i={Trash2} />} title="Delete my account" sub="Permanent — cannot be undone" danger onClick={deleteAccount} />
         </div>
         <div className="settings-section" style={{ marginTop: 12 }}>
           <h2>Legal</h2>
@@ -1254,7 +1354,7 @@ function Settings({ go }) {
             <div className="credits">
               <p>Place photos are loaded from the Wikipedia articles below. They are openly licensed (Creative Commons or public domain); the author and licence of each photo are on its Wikipedia / Wikimedia Commons file page.</p>
               {neighbourhoods.map(nb => (
-                <div key={nb.slug} className="credits-group">
+                <div key={nb?.slug} className="credits-group">
                   <b>{nb.name}</b>
                   <ul>{[...new Set(WIKI[nb.slug] || [])].map(t => <li key={t}><a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(t)}`} target="_blank" rel="noopener noreferrer">{t.replace(/_/g, ' ')}</a></li>)}</ul>
                 </div>
@@ -1264,7 +1364,7 @@ function Settings({ go }) {
         </div>
         <div className="settings-section" style={{ marginTop: 12 }}>
           <h2>Account</h2>
-          <Row icon={<Ic i={LogOut} />} title="Log out" danger />
+          <Row icon={<Ic i={LogOut} />} title="Log out" danger onClick={signOut} />
         </div>
         <button className="explore-btn-big" style={{ marginTop: 16 }} onClick={() => go('profile')}>Back to Profile</button>
       </div>
@@ -1280,11 +1380,31 @@ const NAV = [
   ['walk', 'Active Walk'], ['complete', 'Complete'], ['profile', 'Profile'], ['settings', 'Settings'],
 ]
 
+const USER_PAGES = ['bookings', 'passport', 'notifications', 'profile', 'settings', 'walk', 'complete']
+
 export default function App() {
   const [page, setPage] = useState('splash')
   const [walk, setWalk] = useState(walks[0])
   const [nb, setNb] = useState(neighbourhoods[0])
   const [earned, setEarned] = useState(false)
+  const [boot, setBoot] = useState(LIVE ? 'loading' : 'ready')   // loading | ready | error
+  const [notice, setNotice] = useState('')
+  const loadAll = async () => {
+    setBoot('loading')
+    try {
+      await hydrateCatalog()
+      setWalk(walks[0]); setNb(neighbourhoods[0])
+      if (api.isSignedIn()) { await hydrateUser().catch(() => {}); setPage('home') }
+      setBoot('ready')
+    } catch (e) { setBoot('error') }
+  }
+  useEffect(() => { if (LIVE) loadAll() }, [])
+  useEffect(() => onSessionEnded(reason => {
+    clearUserData()
+    setNotice(reason === 'other_device' ? 'You were signed out because this account was signed in on another device.' : 'Your session has ended. Please sign in again.')
+    setPage('login')
+  }), [])
+  const onAuthed = async () => { setNotice(''); await hydrateUser().catch(() => {}) }
   // on every screen change: set the page title and move focus to the new screen (for keyboard / screen-reader users)
   useEffect(() => {
     const label = (NAV.find(n => n[0] === page) || [page, page])[1].replace(/^[^A-Za-z]+/, '')
@@ -1292,7 +1412,15 @@ export default function App() {
     const el = document.querySelector('.stage .screen')
     if (el) { el.setAttribute('tabindex', '-1'); el.setAttribute('role', 'main'); el.setAttribute('aria-label', label); el.focus({ preventScroll: true }) }
   }, [page])
-  const go = p => { if (p !== 'passport') setEarned(false); setPage(p) }
+  const go = async p => {
+    if (LIVE) {
+      const signedIn = api.isSignedIn()
+      if (USER_PAGES.includes(p) && !signedIn) { setNotice('Please sign in to continue.'); setPage('login'); return }
+      if (signedIn && (USER_PAGES.includes(p) || p === 'home')) { try { await hydrateUser() } catch (_) {} }
+    }
+    if (p !== 'passport') setEarned(false)
+    setPage(p)
+  }
   const openWalk = w => { setWalk(w); setPage('walk-detail') }
   const openNb = n => { setNb(n); setPage('neighbourhood') }
   const startWalk = w => { setWalk(w); setPage('walk') }
@@ -1301,29 +1429,39 @@ export default function App() {
   const screens = {
     splash: <Splash go={go} />,
     about: <About go={go} />,
-    signup: <Signup go={go} />,
-    login: <Login go={go} />,
+    signup: <Signup go={go} onAuthed={onAuthed} />,
+    login: <Login go={go} onAuthed={onAuthed} notice={notice} />,
     'location-prime': <LocationPrime go={go} />,
     home: <Home go={go} openNb={openNb} startWalk={startWalk} />,
     explore: <Explore go={go} openWalk={openWalk} />,
-    'walk-detail': <WalkDetail key={walk.id} walk={walk} go={go} onStart={() => startWalk(walk)} />,
+    'walk-detail': <WalkDetail key={walk?.id} walk={walk} go={go} onStart={() => startWalk(walk)} />,
     bookings: <Bookings go={go} startWalk={startWalk} />,
     passport: <Passport go={go} earned={earned} />,
-    neighbourhood: <Neighbourhood key={nb.slug} nb={nb} go={go} openWalk={openWalk} />,
+    neighbourhood: <Neighbourhood key={nb?.slug} nb={nb} go={go} openWalk={openWalk} />,
     notifications: <Notifications go={go} />,
-    walk: <Walk key={walk.id} walk={walk} go={go} />,
+    walk: <Walk key={walk?.id} walk={walk} go={go} />,
     complete: <Complete walk={walk} go={go} toPassport={toPassport} />,
     profile: <Profile go={go} toPassport={toPassport} />,
     settings: <Settings go={go} />,
   }
 
+  if (boot !== 'ready') {
+    return (
+      <div className="stage"><div className="phone-col"><div className="phone"><div className="screen" style={{ display: 'grid', placeItems: 'center', textAlign: 'center', padding: 24 }}>
+        {boot === 'loading'
+          ? <div role="status">Loading walks…</div>
+          : <div className="empty-state"><div className="empty-title">Can't reach the server</div><div className="empty-body">Check your connection and try again.</div><button className="btn-ghost empty-cta" style={{ width: 'auto', padding: '9px 18px', fontSize: 13 }} onClick={loadAll}>Try again</button></div>}
+      </div></div></div></div>
+    )
+  }
+
   return (
     <>
-      <nav className="nav-row" aria-label="Prototype screens">
+      {!LIVE && <nav className="nav-row" aria-label="Prototype screens">
         {NAV.map((n, i) => n === '|'
           ? <div className="nav-sep" key={i} />
           : <button key={n[0]} className={cx('navbtn', page === n[0] && 'active')} aria-current={page === n[0] ? 'page' : undefined} onClick={() => go(n[0])}>{n[1]}</button>)}
-      </nav>
+      </nav>}
       <div className="stage" key={page}>{screens[page]}</div>
     </>
   )

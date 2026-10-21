@@ -25,3 +25,10 @@ Photos are loaded from each place's Wikipedia article automatically (no key). Pu
 - Stop coordinates (`coords` in `src/data.js`), difficulty labels, audio-sample titles, tags and review counts are placeholders.
 - Active Walk uses Leaflet + OpenStreetMap tiles (no API key). Audio playback is simulated.
 - Settings → Photo credits lists the Wikipedia article behind each place photo.
+
+## Live mode (backend connected)
+Set `VITE_API_URL` (copy `.env.example` to `.env`) and the app loads real data from the API; leave it unset and it runs as the original prototype with `src/data.js`.
+- `src/api.js`: API client (tokens, device id, errors). `src/live.js`: loads API data into the arrays the screens already use.
+- The backend must allow the dev origin, e.g. `ALLOWED_ORIGINS=http://localhost:5173` (use `localhost`, not `127.0.0.1`).
+- Wired: sign up, log in, log out, catalogue, walk detail with real audio sample, buy (mock payments), bookings, cancel, move to this device, passport, notifications, profile, settings (preferences, export, delete).
+- Not wired yet: walking screen, rating/comment, OTP, Google sign-in, forgot password, Razorpay checkout.
