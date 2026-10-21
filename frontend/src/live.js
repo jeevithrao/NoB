@@ -108,7 +108,34 @@ export function downloadJson(data, name) {
 }
 export { slugOf }
 
+
 // In live mode never show the prototype's demo rows, even for a moment.
 if (LIVE) {
   ;[walks, neighbourhoods, passportSlots, reviews, notificationsData, bookingsData.upcoming, bookingsData.past].forEach(a => { a.length = 0 })
+}
+
+export const uid = () => (globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : 'e' + Date.now() + Math.random().toString(16).slice(2))
+export const lastWalk = { summary: null }
+
+// Download every stop's audio once, keep it in the Cache API (keyed WITHOUT the signature so a later,
+// freshly signed URL still hits it) and hand back playable blob URLs. This fixes two things at once:
+// signed URLs expire after an hour but a walk can run longer, and the walk works with no signal.
+export async function prepareAudio(stops, onProgress = () => {}) {
+  const store = typeof caches !== 'undefined' ? await caches.open('nob-audio-v1').catch(() => null) : null
+  const out = {}
+  let done = 0
+  for (const s of stops) {
+    const url = api.mediaUrl(s.audioUrl)
+    const key = url.split('?')[0]
+    let res = store ? await store.match(key) : null
+    if (!res) {
+      const net = await fetch(url)
+      if (!net.ok) throw new Error(`Audio for "${s.n}" could not be downloaded (${net.status}).`)
+      if (store) await store.put(key, net.clone())
+      res = net
+    }
+    out[s.id] = URL.createObjectURL(await res.blob())
+    onProgress(++done, stops.length)
+  }
+  return out
 }

@@ -182,7 +182,7 @@ export function createApi({ baseUrl = 'http://localhost:8000', storage, fetchImp
     // ---------- walking ----------
     sessions: {
       start: tourId => post('/sessions', { tour_id: tourId }), // starts OR resumes
-      // events: [{ stopId, type: 'arrived'|'audio_started'|'audio_finished'|'skipped', at?: Date, id?: string }]
+      // events: [{ stopId, type: 'arrived'|'audio_started'|'audio_finished', at?: Date, id?: string }]
       sendEvents: (sessionId, events) =>
         post(`/sessions/${sessionId}/events/batch`, {
           events: events.map(e => ({ client_event_id: e.id || uuid(), stop_id: e.stopId, event_type: e.type, occurred_at: (e.at || new Date()).toISOString() })),

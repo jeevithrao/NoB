@@ -3,7 +3,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { walks, neighbourhoods, passportSlots, bookingsData, notificationsData, reviews } from './data'
 import { REMOTE, WIKI, localPhoto, wikiImage, altFor } from './images'
-import { LIVE, api, profile, hydrateCatalog, hydrateUser, clearUserData, onSessionEnded, friendlyError, downloadJson } from './live'
+import { LIVE, api, profile, hydrateCatalog, hydrateUser, clearUserData, onSessionEnded, friendlyError, downloadJson, uid, lastWalk, prepareAudio } from './live'
 import { User, Search, Bell, Home as HomeIcon, Compass, Settings as SettingsIcon, ArrowLeft, Eye, EyeOff, MapPin, Smartphone, CreditCard, Star, X, Lock, Play, Pause, Ticket, BookOpen, Download, Heart, MessageCircle, Map as MapIcon, CheckCircle2, Pencil, Trash2, FileText, Wallet, Mail, Info, LogOut, BarChart3, ChevronRight, WifiOff, Footprints, Languages, Activity, RotateCcw, RotateCw, Crosshair, Maximize2 } from 'lucide-react'
 const Ic = ({ i: I, size = 18 }) => <I size={size} strokeWidth={1.8} aria-hidden="true" />
 
@@ -1145,10 +1145,24 @@ function WalkMap({ stops, cur, user, locOff }) {
   )
 }
 
-function Walk({ walk: w, go }) {
-  const stops = w.stops
+function WalkPlayer({ walk: w, go, live }) {
+  const stops = live ? live.stops : w.stops
   const [gps, setGps] = useState(false)
-  const [cur, setCur] = useState(Math.min(1, stops.length - 1))
+  const [cur, setCur] = useState(live ? Math.max(0, Math.min(live.session.stops_visited - 1, stops.length - 1)) : Math.min(1, stops.length - 1))
+  const audioRef = useRef(null)
+  const [dur, setDur] = useState(STORY_SECS)
+  const [audioDone, setAudioDone] = useState(false)
+  const [finishing, setFinishing] = useState(false)
+  const [finErr, setFinErr] = useState('')
+  const queueRef = useRef([])
+  const curRef = useRef(cur)
+  curRef.current = cur
+  const queue = (type, stopId) => { if (live) queueRef.current.push({ id: uid(), stopId, type, at: new Date() }) }
+  const flush = async () => {
+    if (!live || !queueRef.current.length) return
+    const batch = queueRef.current.splice(0)
+    try { await api.sessions.sendEvents(live.session.id, batch) } catch (e) { queueRef.current.unshift(...batch); throw e }
+  }
   const [user, setUser] = useState(null)
   const [loc, setLoc] = useState('pending')   // pending | ok | denied | unavailable
   const [t, setT] = useState(0)
@@ -1157,34 +1171,97 @@ function Walk({ walk: w, go }) {
   const stop = stops[cur]
   const next = stops[cur + 1]
   const last = cur === stops.length - 1
-  const ended = t >= STORY_SECS
+  const total = live ? dur : STORY_SECS
+  const ended = live ? audioDone : t >= STORY_SECS
+
+  // live: audio for the current stop, arrival events, geofence, wake lock
+  useEffect(() => {
+    if (!live) return
+    const a = audioRef.current
+    a.src = live.audio[stop.id]
+    a.playbackRate = speed
+    setT(0); setAudioDone(false); setDur(STORY_SECS)
+    queue('arrived', stop.id)
+    a.play().catch(() => setPlaying(false))
+  }, [cur])
+  useEffect(() => {
+    if (!live) return
+    const tick = setInterval(() => { flush().catch(() => {}) }, 10000)
+    const hide = () => { if (document.visibilityState === 'hidden') flush().catch(() => {}) }
+    document.addEventListener('visibilitychange', hide)
+    return () => { clearInterval(tick); document.removeEventListener('visibilitychange', hide); flush().catch(() => {}); if (audioRef.current) audioRef.current.pause() }
+  }, [])
+  useEffect(() => {
+    if (!live || !navigator.wakeLock) return
+    let lock = null
+    const get = async () => { try { lock = await navigator.wakeLock.request('screen') } catch (_) {} }
+    get()
+    const vis = () => { if (document.visibilityState === 'visible') get() }
+    document.addEventListener('visibilitychange', vis)
+    return () => { document.removeEventListener('visibilitychange', vis); if (lock) lock.release().catch(() => {}) }
+  }, [])
+  const onPosition = c => {   // entering the next stop's trigger radius moves the walk on, in order
+    if (!live) return
+    const nxt = stops[curRef.current + 1]
+    if (!nxt) return
+    if (metres([c.latitude, c.longitude], nxt.coords) <= Math.max(nxt.radius || 30, 20) + Math.min(c.accuracy || 0, 25)) setCur(curRef.current + 1)
+  }
 
   // walker's position (only if the browser/user allows it)
   useEffect(() => {
     if (!navigator.geolocation) { setLoc('unavailable'); return }
     const id = navigator.geolocation.watchPosition(
-      p => { setUser([p.coords.latitude, p.coords.longitude]); setLoc('ok'); setGps(false) },
+      p => { setUser([p.coords.latitude, p.coords.longitude]); setLoc('ok'); setGps(false); onPosition(p.coords) },
       e => { if (e.code === 1) setLoc('denied'); else setGps(true) },   // 1 = permission denied: stay quiet, the map just has no "you" dot
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 })
     return () => navigator.geolocation.clearWatch(id)
   }, [])
   // simulated audio clock (real audio files would replace this)
   useEffect(() => {
-    if (!playing || ended) return
+    if (live || !playing || ended) return
     const id = setInterval(() => setT(x => Math.min(STORY_SECS, x + 1)), 1000 / speed)
     return () => clearInterval(id)
   }, [playing, ended, speed])
-  useEffect(() => { if (ended) setPlaying(false) }, [ended])
+  useEffect(() => { if (!live && ended) setPlaying(false) }, [ended])
 
-  const skip = d => setT(x => Math.max(0, Math.min(STORY_SECS, x + d)))
+  const seek = v => { if (live) { audioRef.current.currentTime = v; setT(v) } else setT(v) }
+  const skip = d => { if (live) seek(Math.max(0, Math.min(dur, audioRef.current.currentTime + d))); else setT(x => Math.max(0, Math.min(STORY_SECS, x + d))) }
   const goTo = i => { setCur(i); setT(0); setPlaying(true) }
-  const toggle = () => { if (ended) { setT(0); setPlaying(true) } else setPlaying(p => !p) }
-  const cycleSpeed = () => setSpeed(v => SPEEDS[(SPEEDS.indexOf(v) + 1) % SPEEDS.length])
+  const toggle = () => {
+    if (live) {
+      const a = audioRef.current
+      if (ended) { a.currentTime = 0; setAudioDone(false) }
+      if (a.paused || ended) a.play().catch(() => {}); else a.pause()
+      return
+    }
+    if (ended) { setT(0); setPlaying(true) } else setPlaying(p => !p)
+  }
+  const cycleSpeed = () => setSpeed(v => { const n = SPEEDS[(SPEEDS.indexOf(v) + 1) % SPEEDS.length]; if (live && audioRef.current) audioRef.current.playbackRate = n; return n })
+  const finish = async () => {
+    if (!live) return go('complete')
+    setFinishing(true); setFinErr('')
+    try {
+      await flush()
+      await api.sessions.complete(live.session.id)
+      lastWalk.summary = await api.sessions.summary(live.session.id)
+      go('complete')
+    } catch (e) { setFinErr(friendlyError(e, "We couldn't finish the walk. Check your connection and try again.")); setFinishing(false) }
+  }
+  const endEarly = () => {
+    if (live && !window.confirm('End the walk now? It will be marked complete and cannot be walked again.')) return
+    finish()
+  }
   const toNext = next ? metres(user || stop.coords, next.coords) : 0
 
   return (
     <Phone caption="Active walk — GPS + audio (GPS banner demo)">
       <div className="screen walk-hc">
+        {live && <audio ref={audioRef} preload="auto"
+          onTimeUpdate={e => setT(e.currentTarget.currentTime)}
+          onLoadedMetadata={e => setDur(e.currentTarget.duration || STORY_SECS)}
+          onPlay={() => { setPlaying(true); queue('audio_started', stop.id) }}
+          onPause={() => setPlaying(false)}
+          onEnded={() => { setAudioDone(true); setPlaying(false); queue('audio_finished', stop.id) }} />}
         <div className={cx('gps-banner', gps && 'show')} role="status"><Ic i={WifiOff} size={15} /> Signal lost — we'll resume when you're back in range</div>
         <div className="walk-hdr"><span className="wname">{w.t}</span><span className="wpill">Stop {cur + 1} / {stops.length}</span></div>
         <WalkMap stops={stops} cur={cur} user={user} locOff={loc === 'denied' || loc === 'unavailable'} />
@@ -1202,9 +1279,9 @@ function Walk({ walk: w, go }) {
           <div className="audio-stop-label">NOW PLAYING · STOP {String(cur + 1).padStart(2, '0')}</div>
           <div className="audio-stop-name">{stop.n}</div>
           <div className="audio-prog-wrap">
-            <input className="audio-seek" type="range" min={0} max={STORY_SECS} step={1} value={t} aria-label="Seek audio" aria-valuetext={`${fmtTime(t)} of ${fmtTime(STORY_SECS)}`}
-              style={{ '--pct': (t / STORY_SECS) * 100 + '%' }} onChange={e => setT(+e.target.value)} />
-            <div className="audio-times"><span>{fmtTime(t)}</span><span>{fmtTime(STORY_SECS)}</span></div>
+            <input className="audio-seek" type="range" min={0} max={Math.round(total)} step={1} value={Math.round(t)} aria-label="Seek audio" aria-valuetext={`${fmtTime(t)} of ${fmtTime(total)}`}
+              style={{ '--pct': (t / total) * 100 + '%' }} onChange={e => seek(+e.target.value)} />
+            <div className="audio-times"><span>{fmtTime(t)}</span><span>{fmtTime(total)}</span></div>
           </div>
           <div className="player-row">
             <button type="button" className="pl-btn speed" aria-label={`Playback speed ${speed} times. Change speed`} onClick={cycleSpeed}>{speed}×</button>
@@ -1219,7 +1296,7 @@ function Walk({ walk: w, go }) {
             <>
               <div className="nsh-label">LAST STOP</div>
               <div className="nsh-name">You've reached the end of the route</div>
-              <button type="button" className="next-btn" onClick={() => go('complete')}>Finish walk <Ic i={ChevronRight} size={18} /></button>
+              <button type="button" className="next-btn" onClick={finish} disabled={finishing}>{finishing ? 'Finishing…' : 'Finish walk'} <Ic i={ChevronRight} size={18} /></button>
             </>
           ) : (
             <>
@@ -1230,8 +1307,46 @@ function Walk({ walk: w, go }) {
             </>
           )}
         </div>
-        <button className="gps-demo-btn" onClick={() => setGps(g => !g)}>⚡ Demo: Toggle GPS lost banner</button>
-        <button className="end-walk-btn" onClick={() => go('complete')}>End walk early</button>
+        {finErr && <div className="pay-error" role="alert" style={{ margin: '0 16px 8px' }}><span>{finErr}</span></div>}
+        {!live && <button className="gps-demo-btn" onClick={() => setGps(g => !g)}>⚡ Demo: Toggle GPS lost banner</button>}
+        <button className="end-walk-btn" onClick={endEarly} disabled={finishing}>End walk early</button>
+      </div>
+    </Phone>
+  )
+}
+
+function Walk({ walk: w, go }) {
+  const [st, setSt] = useState(LIVE ? { s: 'loading', msg: 'Preparing your walk…' } : { s: 'demo' })
+  const [tryN, setTryN] = useState(0)
+  useEffect(() => {
+    if (!LIVE) return
+    let dead = false
+    setSt({ s: 'loading', msg: 'Preparing your walk…' })
+    ;(async () => {
+      try {
+        const pkg = await api.tours.package(w.id)
+        const stops = pkg.stops.map(x => ({ id: x.id, e: x.icon, n: x.name, d: x.blurb, coords: [x.lat, x.lng], radius: x.trigger_radius_m, audioUrl: x.audio_url }))
+        const audio = await prepareAudio(stops, (i, n) => { if (!dead) setSt({ s: 'loading', msg: `Downloading audio… ${i} of ${n}` }) })
+        const session = await api.sessions.start(w.id)
+        if (!dead) setSt({ s: 'ready', live: { stops, audio, session } })
+      } catch (e) { if (!dead) setSt({ s: 'error', e }) }
+    })()
+    return () => { dead = true }
+  }, [w.id, tryN])
+  if (st.s === 'demo') return <WalkPlayer walk={w} go={go} />
+  if (st.s === 'ready') return <WalkPlayer walk={w} go={go} live={st.live} />
+  const e = st.e
+  const info = st.s === 'error' && (
+    e && e.code === 'BOUND_TO_OTHER_DEVICE' ? ['This walk is on another device', 'Open My Bookings and choose "Use on this device" to move it here.', ['Go to bookings', () => go('bookings')]]
+    : e && e.code === 'TOUR_NOT_OWNED' ? ['Get this walk first', 'You need to buy this walk before you can start it.', ['Back to walks', () => go('explore')]]
+    : e && e.code === 'TOUR_ALREADY_COMPLETED' ? ["You've already walked this one", 'Each walk can be completed once. See your stamp in the passport.', ['Open passport', () => go('passport')]]
+    : ["We couldn't start the walk", friendlyError(e), ['Try again', () => setTryN(n => n + 1)]])
+  return (
+    <Phone caption="Active walk">
+      <div className="screen" style={{ display: 'grid', placeItems: 'center', textAlign: 'center', padding: 24 }}>
+        {st.s === 'loading'
+          ? <div role="status">{st.msg}</div>
+          : <div className="empty-state"><div className="empty-title">{info[0]}</div><div className="empty-body">{info[1]}</div><button className="btn-ghost empty-cta" style={{ width: 'auto', padding: '9px 18px', fontSize: 13 }} onClick={info[2][1]}>{info[2][0]}</button><button className="back" style={{ marginTop: 10 }} onClick={() => go('home')}>Back to home</button></div>}
       </div>
     </Phone>
   )
@@ -1239,7 +1354,16 @@ function Walk({ walk: w, go }) {
 
 /* ───────── COMPLETE ───────── */
 function Complete({ walk: w, go, toPassport }) {
-  const [liked, setLiked] = useState(false)
+  const sm = LIVE ? lastWalk.summary : null
+  const [liked, setLiked] = useState(!!(sm && sm.liked))
+  const [myRating, setMyRating] = useState(sm ? sm.my_rating : null)
+  const [commenting, setCommenting] = useState(false)
+  const [text, setText] = useState('')
+  const [note, setNote] = useState('')
+  const act = async fn => { try { await fn(); setNote('') } catch (e) { setNote(friendlyError(e)) } }
+  const rate = n => act(async () => { await api.social.rate(w.id, n); setMyRating(n) })
+  const toggleLike = () => act(async () => { if (liked) await api.social.unlike(w.id); else await api.social.like(w.id); setLiked(!liked) })
+  const sendComment = () => act(async () => { if (!text.trim()) return; await api.social.comment(w.id, text.trim()); setText(''); setCommenting(false); setNote('Thanks for your comment.') })
   return (
     <Phone caption="Walk complete (→ passport with justEarned)">
       <div className="screen">
@@ -1251,13 +1375,30 @@ function Complete({ walk: w, go, toPassport }) {
             <span style={{ ...mono, fontSize: 11 }}>Tour locked · purchased once</span>
           </div>
           <div className="complete-stats">
-            {[[String(w.stops.length), 'Stops'], [w.distance.replace(' ', ''), 'Walked'], [w.duration.replace(' min', 'm'), 'Duration'], [w.rating + ' ★', 'Avg rating']].map(([v, k]) => <div className="cstat" key={k}><div className="cv">{v}</div><div className="ck">{k}</div></div>)}
+            {(sm ? [[`${sm.stops_visited}/${sm.stop_count}`, 'Stops'], [`${sm.distance_km}km`, 'Walked'], [`${sm.duration_min}m`, 'Duration'], [sm.avg_rating == null ? '–' : Number(sm.avg_rating).toFixed(1) + ' ★', 'Avg rating']] : [[String(w.stops.length), 'Stops'], [w.distance.replace(' ', ''), 'Walked'], [w.duration.replace(' min', 'm'), 'Duration'], [w.rating + ' ★', 'Avg rating']]).map(([v, k]) => <div className="cstat" key={k}><div className="cv">{v}</div><div className="ck">{k}</div></div>)}
           </div>
           <div className="lc-row">
-            <button className={cx('lc-btn', liked && 'liked')} onClick={() => setLiked(l => !l)}><Ic i={Heart} size={15} /> {liked ? 'Liked' : 'Like'}</button>
-            <button className="lc-btn"><Ic i={MessageCircle} size={15} /> Comment</button>
+            <button className={cx('lc-btn', liked && 'liked')} onClick={LIVE ? toggleLike : () => setLiked(l => !l)}><Ic i={Heart} size={15} /> {liked ? 'Liked' : 'Like'}</button>
+            <button className="lc-btn" onClick={() => LIVE && setCommenting(c => !c)}><Ic i={MessageCircle} size={15} /> Comment</button>
           </div>
-          <button className="btn-primary" onClick={() => toPassport(true)} style={{ marginBottom: 8 }}><Ic i={BookOpen} size={16} /> View your new stamp →</button>
+          {LIVE && (
+            <div style={{ marginBottom: 14 }}>
+              <div role="radiogroup" aria-label="Rate this walk" style={{ display: 'flex', gap: 4, justifyContent: 'center', marginBottom: 8 }}>
+                {[1, 2, 3, 4, 5].map(n => (
+                  <button key={n} type="button" role="radio" aria-checked={myRating === n} aria-label={`${n} star${n > 1 ? 's' : ''}`} onClick={() => rate(n)}
+                    style={{ background: 'none', border: 0, fontSize: 28, lineHeight: 1, minWidth: 44, minHeight: 44, cursor: 'pointer', color: myRating >= n ? 'var(--rust)' : 'var(--text-soft)' }}>{myRating >= n ? '★' : '☆'}</button>
+                ))}
+              </div>
+              {commenting && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input className="field" aria-label="Your comment" placeholder="Share a thought about this walk" maxLength={500} value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendComment()} />
+                  <button className="btn-primary" style={{ width: 'auto', padding: '0 16px' }} onClick={sendComment}>Send</button>
+                </div>
+              )}
+              {note && <div className="pay-error" role="status" style={{ marginTop: 8 }}><span>{note}</span></div>}
+            </div>
+          )}
+          <button className="btn-primary" onClick={() => toPassport(!sm || sm.stamp_earned)} style={{ marginBottom: 8 }}><Ic i={BookOpen} size={16} /> {!sm || sm.stamp_earned ? 'View your new stamp →' : 'View your passport →'}</button>
           <button className="btn-ghost" onClick={() => go('home')}>Back to home</button>
         </div>
       </div>
