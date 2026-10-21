@@ -37,7 +37,7 @@ cancellation rules unchanged (14 days, not started).
 | 9 | Device recovery (re-bind) + require device on walk start | `feat/device-recovery` | ✅ |
 | 10 | Account: PATCH /me (+username), preferences, export, delete (anonymise), forgot/reset password | `feat/account` | ✅ |
 | 11 | In-app notifications | `feat/notifications` | ✅ |
-| 12 | Integration kit: OpenAPI export, Postman, docker-compose, reference `api.js`, smoke script | `chore/integration` | 🟦 smoke script done |
+| 12 | Integration kit: OpenAPI export, Postman import, reference `api.js`, smoke script | `chore/integration` | ✅ |
 | 13 | Staging deploy config, final docs sync | `chore/deploy` | ⬜ |
 
 **Checkpoint 3** (`v0.2.0`): staging-ready, partner can integrate.
