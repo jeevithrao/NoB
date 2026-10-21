@@ -120,3 +120,7 @@ In-app only (no push in v1). Created automatically, idempotently, and skipped fo
 - `docs/openapi.json`: exported contract (55 paths), guarded by a snapshot test.
 - `docs/frontend-kit/api.js` + `smoke.mjs`: reference client and a 35-step journey verified against the live API.
 - `docs/INTEGRATION.md`: local run steps.
+
+## Deployment
+- Compose requires `DB_PASSWORD` (no default password), backend healthcheck, nginx waits for it and mounts TLS certs from `./certs`.
+- See `docs/DEPLOYMENT.md` (untested end to end) and `docs/LEGAL_NOTES.md`.

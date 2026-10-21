@@ -38,3 +38,5 @@ backend/media/audio/*.mp3
 Thumbs.db
 .vscode/
 .idea/
+# TLS material
+certs/

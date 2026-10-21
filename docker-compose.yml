@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   db:
     image: postgres:16
@@ -7,7 +5,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-ethnowalk_user}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-ethnodb26}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env (repo root)}
       POSTGRES_DB: ${DB_NAME:-NoB_db}
     # Port is NOT exposed to the host \u2014 only reachable by other Docker services.
     # To connect from the host machine for debugging, use:
@@ -28,8 +26,8 @@ services:
     restart: unless-stopped
     env_file: ./backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${DB_USER:-ethnowalk_user}:${DB_PASSWORD:-ethnodb26}@db:5432/${DB_NAME:-NoB_db}
-      - DATABASE_URL_SYNC=postgresql://${DB_USER:-ethnowalk_user}:${DB_PASSWORD:-ethnodb26}@db:5432/${DB_NAME:-NoB_db}
+      - DATABASE_URL=postgresql+asyncpg://${DB_USER:-ethnowalk_user}:${DB_PASSWORD:?set DB_PASSWORD in .env (repo root)}@db:5432/${DB_NAME:-NoB_db}
+      - DATABASE_URL_SYNC=postgresql://${DB_USER:-ethnowalk_user}:${DB_PASSWORD:?set DB_PASSWORD in .env (repo root)}@db:5432/${DB_NAME:-NoB_db}
     depends_on:
       db:
         condition: service_healthy
@@ -37,6 +35,12 @@ services:
       - ./backend/media:/app/media
     expose:
       - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   nginx:
     image: nginx:alpine
@@ -51,10 +55,11 @@ services:
       # Mount SSL certs (provisioned externally via Let's Encrypt / certbot):
       #   docker run --rm -v nob_certs:/etc/letsencrypt certbot/certbot certonly ...
       # Uncomment and point to your cert paths once TLS is provisioned.
-      # - nob_certs:/etc/nginx/ssl:ro
+      - ${CERT_DIR:-./certs}:/etc/nginx/ssl:ro   # needs cert.pem + key.pem
       - /var/www/certbot:/var/www/certbot:ro
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   nob_db_data:
