@@ -155,3 +155,37 @@ export function loadGoogle() {
   }
   return gsi
 }
+
+// ---- Razorpay Checkout (web) ----
+let rzpScript = null
+export function loadRazorpay() {
+  if (window.Razorpay) return Promise.resolve(window.Razorpay)
+  if (!rzpScript) {
+    rzpScript = new Promise((resolve, reject) => {
+      const s = document.createElement('script')
+      s.src = 'https://checkout.razorpay.com/v1/checkout.js'; s.async = true
+      s.onload = () => resolve(window.Razorpay)
+      s.onerror = () => { rzpScript = null; reject(new Error('checkout script')) }
+      document.head.appendChild(s)
+    })
+  }
+  return rzpScript
+}
+
+// Opens Razorpay Checkout for an order the backend created. Resolves with the three values the backend needs to
+// verify the payment; rejects with { dismissed: true } if the user closes the window, or { failed: true, message }.
+export async function openCheckout(cfg, prefill = {}) {
+  const Razorpay = await loadRazorpay()
+  return new Promise((resolve, reject) => {
+    const rzp = new Razorpay({
+      key: cfg.key_id, order_id: cfg.order_id, amount: cfg.amount, currency: cfg.currency, name: cfg.name,
+      description: prefill.description || 'Audio walk',
+      prefill: { name: prefill.name || '', email: prefill.email || '' },
+      theme: { color: '#8B4A2B' },
+      handler: r => resolve({ razorpay_order_id: r.razorpay_order_id, razorpay_payment_id: r.razorpay_payment_id, razorpay_signature: r.razorpay_signature }),
+      modal: { ondismiss: () => reject({ dismissed: true }) },
+    })
+    rzp.on('payment.failed', r => reject({ failed: true, message: (r && r.error && r.error.description) || 'The payment failed.' }))
+    rzp.open()
+  })
+}

@@ -3,7 +3,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { walks, neighbourhoods, passportSlots, bookingsData, notificationsData, reviews } from './data'
 import { REMOTE, WIKI, localPhoto, wikiImage, altFor } from './images'
-import { LIVE, api, profile, hydrateCatalog, hydrateUser, clearUserData, onSessionEnded, friendlyError, downloadJson, uid, lastWalk, prepareAudio, GOOGLE_ID, loadGoogle } from './live'
+import { LIVE, api, profile, hydrateCatalog, hydrateUser, clearUserData, onSessionEnded, friendlyError, downloadJson, uid, lastWalk, prepareAudio, GOOGLE_ID, loadGoogle, openCheckout } from './live'
 import { User, Search, Bell, Home as HomeIcon, Compass, Settings as SettingsIcon, ArrowLeft, Eye, EyeOff, MapPin, Smartphone, CreditCard, Star, X, Lock, Play, Pause, Ticket, BookOpen, Download, Heart, MessageCircle, Map as MapIcon, CheckCircle2, Pencil, Trash2, FileText, Wallet, Mail, Info, LogOut, BarChart3, ChevronRight, WifiOff, Footprints, Languages, Activity, RotateCcw, RotateCw, Crosshair, Maximize2 } from 'lucide-react'
 const Ic = ({ i: I, size = 18 }) => <I size={size} strokeWidth={1.8} aria-hidden="true" />
 
@@ -564,7 +564,29 @@ function Sheet({ walk, onClose, onStart }) {
       setPayErr(''); setPaying(true)
       try {
         const b = await api.purchases.buy(walk.id)
-        if (b.status !== 'completed') throw Object.assign(new Error('Online payments are not switched on yet.'), { status: 400 })
+        if (b.status !== 'completed') {
+          // Real payment: Razorpay Checkout, then the backend verifies the signature. If the verify call is lost
+          // (network drop) the webhook still completes the purchase, so poll for it before giving up.
+          const cfg = b.gateway_config
+          if (!cfg || !cfg.order_id) throw new Error('Online payments are not available right now.')
+          let result
+          try { result = await openCheckout(cfg, { name: profile.user && profile.user.full_name, email: profile.user && profile.user.email, description: walk.t }) }
+          catch (c) {
+            setPaying(false)
+            setPayErr(c && c.dismissed ? 'Payment cancelled. You have not been charged.' : friendlyError(c && c.failed ? { status: 400, message: c.message } : c, 'We could not open the payment window. You have not been charged.'))
+            return
+          }
+          try { await api.purchases.verify(b.purchase_id, result) }
+          catch (e) {
+            if (e && e.status && e.status < 500) { setPaying(false); setPayErr(friendlyError(e, 'We could not verify the payment.')); return }
+            let done = false
+            for (let i = 0; i < 6 && !done; i++) {
+              await new Promise(r => setTimeout(r, 2000))
+              try { done = (await api.purchases.get(b.purchase_id)).status === 'completed' } catch (_) {}
+            }
+            if (!done) { setPaying(false); setPayErr('Your payment went through but we could not confirm it yet. Do not pay again: check My Bookings in a minute, or contact support.'); return }
+          }
+        }
         await api.purchases.bindDevice(b.purchase_id).catch(e => console.warn('bind-device', e))
         setPaying(false); to('paid')
       } catch (e) { setPaying(false); setPayErr(friendlyError(e, "We couldn't complete the purchase. You have not been charged.")) }
@@ -619,6 +641,7 @@ function Sheet({ walk, onClose, onStart }) {
           <div className={cls}>
             <div className="sheet-scroll"><div className="payment-panel-inner">
               <div className="payment-panel-title" id="pay-title">How would you like to pay?</div>
+              {LIVE ? <div style={{ fontSize: 13, color: 'var(--text-soft)', marginBottom: 6 }}>You will choose UPI, card or netbanking in the secure Razorpay window.</div> : (
               <div role="radiogroup" aria-labelledby="pay-title">
               {methods.map(([id, icon, name, sub]) => (
                 <div key={id} className={cx('payment-method-row', method === id && 'selected')} role="radio" aria-checked={method === id} tabIndex={0} onClick={() => setMethod(id)}
@@ -629,6 +652,7 @@ function Sheet({ walk, onClose, onStart }) {
                 </div>
               ))}
               </div>
+              )}
               {payErr && <div className="pay-error" role="alert"><WifiOff size={16} aria-hidden="true" /><span>{payErr}</span></div>}
               <div style={{ fontSize: 11, color: 'var(--text-soft)', ...mono, marginTop: 14, padding: 10, background: 'rgba(46,37,32,.04)', borderRadius: 7 }}><Ic i={Lock} size={13} /> Secured by Razorpay. Your payment details are encrypted.</div>
             </div></div>

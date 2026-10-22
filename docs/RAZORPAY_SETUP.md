@@ -27,9 +27,10 @@ With `MOCK_PAYMENTS=false` the backend refuses to start unless all three are set
 ## 4. Test payments
 Use the test card and UPI details from Razorpay's own page (India section): https://razorpay.com/docs/payments/payments/test-card-upi-details/ . I could not open that page, and the card page I did open listed only US and international cards, so I do not quote numbers here. Use test mode only: test cards fail in live mode.
 
-## Still to build before this works end to end
-- **Frontend checkout:** the pay button currently only works with mock payments. It must call `POST /purchases`, open Razorpay Checkout with the returned order details, then call `POST /purchases/{id}/verify` with the three values Checkout returns. The webhook is the safety net if the browser closes first.
-- Backend side is built and tested with signatures (verify endpoint, idempotent webhook), but has never been run against real Razorpay test keys.
+## What is built and tested
+- Backend: order creation, checkout-signature verify, idempotent signed webhook, refunds (unit-tested with signatures).
+- Frontend: the Pay button opens Razorpay Checkout, sends the result to `POST /purchases/{id}/verify`, handles cancel, decline, invalid signature, and a lost verify call (it polls, because the webhook completes the purchase).
+- Both verified end to end against a **fake** Razorpay (`backend/scripts/fake_razorpay.py`, `frontend/e2e/payment_flow.py`). Not yet run against real Razorpay keys: that is the next test.
 
 ## Go-live (later)
 Live keys need Razorpay's website/KYC verification (about 3 working days per their docs). Replace test keys with live keys everywhere, or customers see success with no money captured.
