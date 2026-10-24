@@ -3,7 +3,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { walks, neighbourhoods, passportSlots, bookingsData, notificationsData, reviews } from './data'
 import { REMOTE, WIKI, localPhoto, wikiImage, altFor } from './images'
-import { LIVE, api, profile, hydrateCatalog, hydrateUser, clearUserData, onSessionEnded, friendlyError, downloadJson, uid, lastWalk, prepareAudio, GOOGLE_ID, loadGoogle, openCheckout } from './live'
+import { LIVE, api, profile, hydrateCatalog, hydrateUser, clearUserData, onSessionEnded, friendlyError, downloadJson, uid, lastWalk, prepareAudio, savePackage, loadPackage, dropPackage, addPending, syncPending, getPending, isNetworkError, GOOGLE_ID, loadGoogle, openCheckout } from './live'
 import { User, Search, Bell, Home as HomeIcon, Compass, Settings as SettingsIcon, ArrowLeft, Eye, EyeOff, MapPin, Smartphone, CreditCard, Star, X, Lock, Play, Pause, Ticket, BookOpen, Download, Heart, MessageCircle, Map as MapIcon, CheckCircle2, Pencil, Trash2, FileText, Wallet, Mail, Info, LogOut, BarChart3, ChevronRight, WifiOff, Footprints, Languages, Activity, RotateCcw, RotateCw, Crosshair, Maximize2 } from 'lucide-react'
 const Ic = ({ i: I, size = 18 }) => <I size={size} strokeWidth={1.8} aria-hidden="true" />
 
@@ -1353,10 +1353,18 @@ function WalkPlayer({ walk: w, go, live }) {
   const curRef = useRef(cur)
   curRef.current = cur
   const queue = (type, stopId) => { if (live) queueRef.current.push({ id: uid(), stopId, type, at: new Date() }) }
+  // Events go to the server when we can; otherwise they are stored on the phone and sent on reconnect.
+  const stash = (events, completed = false) => addPending(w.id, live.session.id, events, completed)
   const flush = async () => {
-    if (!live || !queueRef.current.length) return
+    if (!live) return
     const batch = queueRef.current.splice(0)
-    try { await api.sessions.sendEvents(live.session.id, batch) } catch (e) { queueRef.current.unshift(...batch); throw e }
+    try {
+      if (getPending()) await syncPending()
+      if (batch.length) await api.sessions.sendEvents(live.session.id, batch)
+    } catch (e) {
+      if (isNetworkError(e)) { if (batch.length) stash(batch) } else queueRef.current.unshift(...batch)
+      throw e
+    }
   }
   const [user, setUser] = useState(null)
   const [loc, setLoc] = useState('pending')   // pending | ok | denied | unavailable
@@ -1439,8 +1447,19 @@ function WalkPlayer({ walk: w, go, live }) {
       await flush()
       await api.sessions.complete(live.session.id)
       lastWalk.summary = await api.sessions.summary(live.session.id)
+      await dropPackage(w.id)
       go('complete')
-    } catch (e) { setFinErr(friendlyError(e, "We couldn't finish the walk. Check your connection and try again.")); setFinishing(false) }
+    } catch (e) {
+      if (isNetworkError(e)) {
+        // No signal at the end of the walk: keep it on the phone, show a local summary, sync later.
+        const evs = queueRef.current.splice(0)
+        addPending(w.id, live.session.id, evs, true)
+        lastWalk.summary = { stops_visited: stops.length, stop_count: stops.length, distance_km: String(w.distance || '').replace(/[^\d.]/g, '') || '–', duration_min: String(w.duration || '').replace(/[^\d]/g, '') || '–', avg_rating: null, liked: false, my_rating: null, offline: true }
+        go('complete')
+        return
+      }
+      setFinErr(friendlyError(e, "We couldn't finish the walk. Check your connection and try again.")); setFinishing(false)
+    }
   }
   const endEarly = () => {
     if (live && !window.confirm('End the walk now? It will be marked complete and cannot be walked again.')) return
@@ -1519,11 +1538,23 @@ function Walk({ walk: w, go }) {
     setSt({ s: 'loading', msg: 'Preparing your walk…' })
     ;(async () => {
       try {
-        const pkg = await api.tours.package(w.id)
-        const stops = pkg.stops.map(x => ({ id: x.id, e: x.icon, n: x.name, d: x.blurb, coords: [x.lat, x.lng], radius: x.trigger_radius_m, audioUrl: x.audio_url }))
-        const audio = await prepareAudio(stops, (i, n) => { if (!dead) setSt({ s: 'loading', msg: `Downloading audio… ${i} of ${n}` }) })
-        const session = await api.sessions.start(w.id)
-        if (!dead) setSt({ s: 'ready', live: { stops, audio, session } })
+        let stops, session
+        try {
+          const pkg = await api.tours.package(w.id)
+          stops = pkg.stops.map(x => ({ id: x.id, e: x.icon, n: x.name, d: x.blurb, coords: [x.lat, x.lng], radius: x.trigger_radius_m, audioUrl: x.audio_url }))
+          const audio = await prepareAudio(stops, (i, n) => { if (!dead) setSt({ s: 'loading', msg: `Downloading audio… ${i} of ${n}` }) })
+          session = await api.sessions.start(w.id)
+          savePackage(w.id, stops, session)
+          if (!dead) setSt({ s: 'ready', live: { stops, audio, session } })
+        } catch (e) {
+          // Offline: start from the copy saved on this phone, if there is one.
+          const saved = isNetworkError(e) ? loadPackage(w.id) : null
+          if (!saved) throw e
+          const audio = await prepareAudio(saved.stops)   // all audio is already cached, so this never touches the network
+          const pend = getPending()
+          const sess = { id: (pend && pend.tourId === w.id && pend.sessionId) || saved.sessionId, stops_visited: saved.stops_visited, offline: true }
+          if (!dead) setSt({ s: 'ready', live: { stops: saved.stops, audio, session: sess } })
+        }
       } catch (e) { if (!dead) setSt({ s: 'error', e }) }
     })()
     return () => { dead = true }
@@ -1541,7 +1572,7 @@ function Walk({ walk: w, go }) {
       <div className="screen" style={{ display: 'grid', placeItems: 'center', textAlign: 'center', padding: 24 }}>
         {st.s === 'loading'
           ? <div role="status">{st.msg}</div>
-          : <div className="empty-state"><div className="empty-title">{info[0]}</div><div className="empty-body">{info[1]}</div><button className="btn-ghost empty-cta" style={{ width: 'auto', padding: '9px 18px', fontSize: 13 }} onClick={info[2][1]}>{info[2][0]}</button><button className="back" style={{ marginTop: 10 }} onClick={() => go('home')}>Back to home</button></div>}
+          : <div className="empty-state"><div className="empty-title">{info[0]}</div><div className="empty-body">{info[1]}</div><button className="btn-ghost empty-cta" style={{ width: 'auto', padding: '9px 18px', fontSize: 13 }} onClick={info[2][1]}>{info[2][0]}</button><button type="button" className="btn-ghost empty-cta" style={{ width: 'auto', padding: '9px 18px', fontSize: 13, marginTop: 10 }} onClick={() => go('home')}>Back to home</button></div>}
       </div>
     </Phone>
   )
@@ -1730,11 +1761,13 @@ export default function App() {
     try {
       await hydrateCatalog()
       setWalk(walks[0]); setNb(neighbourhoods[0])
-      if (api.isSignedIn()) { await hydrateUser().catch(() => {}); setPage('home') }
+      if (api.isSignedIn()) { await hydrateUser().catch(() => {}); setPage('home'); syncPending().catch(() => {}) }
       setBoot('ready')
     } catch (e) { setBoot('error') }
   }
   useEffect(() => { if (LIVE) loadAll() }, [])
+  // walks finished or played with no signal are sent as soon as the phone is back online
+  useEffect(() => { if (!LIVE) return; const f = () => { if (api.isSignedIn()) syncPending().then(s => s && hydrateUser().catch(() => {})).catch(() => {}) }; window.addEventListener('online', f); return () => window.removeEventListener('online', f) }, [])
   useEffect(() => onSessionEnded(reason => {
     clearUserData()
     setNotice(reason === 'other_device' ? 'You were signed out because this account was signed in on another device.' : 'Your session has ended. Please sign in again.')

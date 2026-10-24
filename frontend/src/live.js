@@ -19,6 +19,7 @@ const slugOf = name => name.toLowerCase().replace(/\s+/g, '-')
 export function friendlyError(e, fallback = 'Something went wrong. Please try again.') {
   if (e && e.fields && Object.keys(e.fields).length) return Object.values(e.fields)[0]
   if (e && e.message && e.status) return e.message
+  if (e && e.nob) return e.message
   if (e instanceof TypeError) return "Can't reach the server. Check your connection and try again."
   return fallback
 }
@@ -129,8 +130,11 @@ export async function prepareAudio(stops, onProgress = () => {}) {
     const key = url.split('?')[0]
     let res = store ? await store.match(key) : null
     if (!res) {
-      const net = await fetch(url)
-      if (!net.ok) throw new Error(`Audio for "${s.n}" could not be downloaded (${net.status}).`)
+      let net
+      try { net = await fetch(url) } catch (e) { throw Object.assign(new Error(`Can't download the audio for "${s.n}". Check your connection and try again.`), { nob: true, network: true }) }
+      if (!net.ok) throw Object.assign(new Error(net.status === 404
+        ? `The audio for "${s.n}" is missing on the server. Ask the team to generate the walk audio.`
+        : `The audio for "${s.n}" could not be downloaded (error ${net.status}).`), { nob: true })
       if (store) await store.put(key, net.clone())
       res = net
     }
@@ -188,4 +192,57 @@ export async function openCheckout(cfg, prefill = {}) {
     rzp.on('payment.failed', r => reject({ failed: true, message: (r && r.error && r.error.description) || 'The payment failed.' }))
     rzp.open()
   })
+}
+
+
+// ───────── offline walks ─────────
+// First online start caches the walk package; after that a walk can start with no signal.
+// Events and completion are kept in localStorage and sent when the connection returns.
+const PKG = 'nob.pkg.', PENDING = 'nob.pending'
+const lsGet = k => { try { return JSON.parse(localStorage.getItem(k)) } catch { return null } }
+const lsSet = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)) } catch {} }
+const pkgKey = id => PKG + (profile.user?.id || 'anon') + '.' + id
+export const savePackage = (tourId, stops, session) => lsSet(pkgKey(tourId), { stops, sessionId: session?.id || null, stops_visited: session?.stops_visited || 0, savedAt: Date.now() })
+export const loadPackage = tourId => lsGet(pkgKey(tourId))
+export const dropPackage = async tourId => { lsSet(pkgKey(tourId), null) }
+export const isNetworkError = e => !!e && !e.status && (e instanceof TypeError || e.network === true)
+
+export const getPending = () => { const p = lsGet(PENDING); return p && p.userId === (profile.user?.id || 'anon') ? p : null }
+export function addPending(tourId, sessionId, events, completed = false) {
+  const cur = getPending()
+  const base = cur && cur.tourId === tourId ? cur : { userId: profile.user?.id || 'anon', tourId, sessionId: sessionId || null, events: [], completed: false }
+  if (sessionId) base.sessionId = sessionId
+  base.events = base.events.concat(events.map(e => ({ ...e, at: new Date(e.at).toISOString() })))
+  base.completed = base.completed || completed
+  lsSet(PENDING, base)
+}
+export function clearPending() { lsSet(PENDING, null) }
+
+// Sends whatever is stored: resumes/starts the session, events in batches of 200, then completion.
+// Returns the summary if a walk was completed, otherwise null. Throws on network trouble (state is kept).
+let syncing = null
+export function syncPending() {
+  if (!LIVE) return Promise.resolve(null)
+  if (syncing) return syncing
+  syncing = (async () => {
+    let p = getPending()
+    if (!p) return null
+    if (!p.sessionId) { const sess = await api.sessions.start(p.tourId); p.sessionId = sess.id; lsSet(PENDING, p) }
+    while (p.events.length) {
+      const chunk = p.events.slice(0, 200)
+      await api.sessions.sendEvents(p.sessionId, chunk.map(e => ({ ...e, at: new Date(e.at) })))
+      p.events = p.events.slice(chunk.length); lsSet(PENDING, p)
+    }
+    let summary = null
+    if (p.completed) {
+      await api.sessions.complete(p.sessionId)
+      summary = await api.sessions.summary(p.sessionId)
+      const pkg = loadPackage(p.tourId)
+      await dropPackage(p.tourId)
+      try { const c = await caches.open('nob-audio-v1'); for (const st of (pkg?.stops || [])) await c.delete(api.mediaUrl(st.audioUrl).split('?')[0]) } catch {}
+    }
+    clearPending()
+    return summary
+  })().finally(() => { syncing = null })
+  return syncing
 }

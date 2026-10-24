@@ -35,3 +35,6 @@ Set `VITE_API_URL` (copy `.env.example` to `.env`) and the app loads real data f
 - Not wired yet: Razorpay checkout (pay button works with mock payments only).
 - Walking (live): downloads and caches every stop's audio, plays real audio, advances on arriving inside a stop's trigger radius (or "Next stop"), batches `arrived` / `audio_started` / `audio_finished` events, keeps the screen awake, and completes the walk with rating, like and comment on the finish screen. Ending early asks for confirmation, because a completed walk cannot be replayed.
 - PWA: installable, offline app shell, cached walk audio. See `../docs/PHONE.md`. The service worker only registers in production builds (`npm run build`).
+
+## Offline walks
+The first online start of a walk saves its package (stops, coordinates, audio links) on the phone and the audio in the Cache API. After that the walk can be started and finished with no signal: events and completion are kept in `localStorage` (`nob.pending`) and sent when the connection returns (`online` event or next app start). Limits: the catalogue itself still needs a connection to load after a full page reload, and rating/liking needs a connection. Test: `python3 frontend/e2e/offline_walk.py`.
