@@ -8,7 +8,8 @@ NoB runs as a Progressive Web App: the website opens in the phone's browser and 
 | Install | Android Chrome: "Install app". iPhone Safari: Share, then "Add to Home Screen". |
 | HTTPS | Required for install, service worker and GPS on any address except `localhost`. |
 | Audio | After you start a walk, all stop audio is downloaded and cached on the phone, so it keeps playing without signal. |
-| Offline start | Not yet: starting a walk needs a connection (package + session). Start on signal, then walk. Events are queued and retried; finishing the walk needs a connection. |
+| Start of a walk | The app first shows the way to the starting point (street route, distance, Google Maps link). The **Start walk** button appears when you are within the stop's trigger radius; the walk is only recorded as started when you tap it. In development builds a "Testing only" button skips this. If location is off, an "I'm at the start" button is shown instead. |
+| Offline | After one online start the walk is saved on the phone and can be started and finished offline; events sync when the connection returns. |
 | GPS | Only while the app is open on screen. The app asks the browser to keep the screen awake during a walk. iOS may be stricter: test it. |
 | Maps | Tiles load from OpenStreetMap while online and are cached briefly. |
 | Icons | Placeholder icons (`frontend/public/icons`). Replace with real branding. |

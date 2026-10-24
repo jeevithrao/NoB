@@ -3,7 +3,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { walks, neighbourhoods, passportSlots, bookingsData, notificationsData, reviews } from './data'
 import { REMOTE, WIKI, localPhoto, wikiImage, altFor } from './images'
-import { LIVE, api, profile, hydrateCatalog, hydrateUser, clearUserData, onSessionEnded, friendlyError, downloadJson, uid, lastWalk, prepareAudio, savePackage, loadPackage, dropPackage, addPending, syncPending, getPending, isNetworkError, GOOGLE_ID, loadGoogle, openCheckout } from './live'
+import { LIVE, api, profile, hydrateCatalog, hydrateUser, clearUserData, onSessionEnded, friendlyError, downloadJson, uid, lastWalk, prepareAudio, savePackage, loadPackage, walkRoute, dropPackage, addPending, syncPending, getPending, isNetworkError, GOOGLE_ID, loadGoogle, openCheckout } from './live'
 import { User, Search, Bell, Home as HomeIcon, Compass, Settings as SettingsIcon, ArrowLeft, Eye, EyeOff, MapPin, Smartphone, CreditCard, Star, X, Lock, Play, Pause, Ticket, BookOpen, Download, Heart, MessageCircle, Map as MapIcon, CheckCircle2, Pencil, Trash2, FileText, Wallet, Mail, Info, LogOut, BarChart3, ChevronRight, WifiOff, Footprints, Languages, Activity, RotateCcw, RotateCw, Crosshair, Maximize2 } from 'lucide-react'
 const Ic = ({ i: I, size = 18 }) => <I size={size} strokeWidth={1.8} aria-hidden="true" />
 
@@ -202,7 +202,7 @@ function Splash({ go }) {
 function About({ go }) {
   const [i, setI] = useState(0)
   const [toast, setToast] = useState(false)
-  const finish = () => { setToast(true); setTimeout(() => { setToast(false); go('signup') }, 1300) }
+  const finish = () => { try { localStorage.setItem('nob.seenIntro', '1') } catch {}; setToast(true); setTimeout(() => { setToast(false); go(LIVE ? 'welcome' : 'signup') }, 1300) }
   const rise = i === 1
   return (
     <Phone caption="About (1/2 → 2/2)">
@@ -263,7 +263,7 @@ function Signup({ go, onAuthed }) {
     <Phone caption="Sign up">
       <div className="screen">
         <div className="signup-hero">
-          <div className="back" {...press(() => go('login'))}>← Already have an account?</div>
+          <div className="back" {...press(() => go('login'))}>← Already have an account? Sign in</div>
           <h1>Create your<br />account.</h1>
         </div>
         <div style={{ padding: '18px 18px 0', flex: 1, overflowY: 'auto' }}>
@@ -280,6 +280,27 @@ function Signup({ go, onAuthed }) {
             <GoogleBtn go={go} onAuthed={onAuthed} dest="location-prime" />
           </div>
         </div>
+      </div>
+    </Phone>
+  )
+}
+
+/* ───────── WELCOME: new or returning ───────── */
+function Welcome({ go, onAuthed }) {
+  return (
+    <Phone caption="Welcome">
+      <div className="screen">
+        <div className="login-hero">
+          <span>Neighbourhoods of Bengaluru</span>
+          <h1>Walk the city<br />with a story in your ears.</h1>
+        </div>
+        <div style={{ padding: '24px 18px 0', flex: 1, overflowY: 'auto' }}>
+          <button className="btn-primary" onClick={() => go('signup')} style={{ marginBottom: 10 }}>Create an account</button>
+          <button className="btn-ghost" onClick={() => go('login')} style={{ width: '100%', marginBottom: 14, padding: 12 }}>I already have an account · Sign in</button>
+          <div className="or-row"><div className="or-line" /><span className="or-label">or</span><div className="or-line" /></div>
+          <GoogleBtn go={go} onAuthed={onAuthed} dest="home" />
+        </div>
+        <button className="explore-btn-big" onClick={() => go('home')}>Browse walks without signing in</button>
       </div>
     </Phone>
   )
@@ -1309,14 +1330,17 @@ function WalkMap({ stops, cur, user, locOff }) {
     let errs = 0
     tiles.on('tileerror', () => { if (++errs >= 3) setTilesOk(false) })
     tiles.on('tileload', () => { errs = 0; setTilesOk(true) })
-    L.polyline(pts, { color: '#2E2520', weight: 8, opacity: .9, lineJoin: 'round' }).addTo(m)          // dark casing
-    L.polyline(pts, { color: '#E8845F', weight: 4, opacity: 1, lineJoin: 'round' }).addTo(m)           // route
+    const casing = L.polyline(pts, { color: '#2E2520', weight: 8, opacity: .9, lineJoin: 'round' }).addTo(m)   // dark casing
+    const line = L.polyline(pts, { color: '#E8845F', weight: 4, opacity: 1, lineJoin: 'round' }).addTo(m)     // route
+    // straight line first, then the real walking route along the streets once we have it
+    let gone = false
+    if (LIVE) walkRoute(pts, { persist: true }).then(r => { if (r && !gone && map.current) { casing.setLatLngs(r.line); line.setLatLngs(r.line) } })
     marks.current = stops.map((s, i) => L.marker(s.coords, { icon: pinIcon(i, 'todo'), keyboard: false, interactive: false }).addTo(m))
     m.fitBounds(L.latLngBounds(pts), { padding: [30, 30] })
     // the container is sized by flex layout after mount: re-measure and re-fit whenever its size changes
     const ro = new ResizeObserver(() => { m.invalidateSize(); m.fitBounds(L.latLngBounds(pts), { padding: [30, 30], animate: false }) })
     ro.observe(el.current)
-    return () => { ro.disconnect(); m.remove(); map.current = null; me.current = null }
+    return () => { gone = true; ro.disconnect(); m.remove(); map.current = null; me.current = null }
   }, [])
   useEffect(() => { marks.current.forEach((mk, i) => mk.setIcon(pinIcon(i, i < cur ? 'done' : i === cur ? 'now' : 'todo'))) }, [cur])
   useEffect(() => {
@@ -1354,13 +1378,20 @@ function WalkPlayer({ walk: w, go, live }) {
   curRef.current = cur
   const queue = (type, stopId) => { if (live) queueRef.current.push({ id: uid(), stopId, type, at: new Date() }) }
   // Events go to the server when we can; otherwise they are stored on the phone and sent on reconnect.
-  const stash = (events, completed = false) => addPending(w.id, live.session.id, events, completed)
+  const sessRef = useRef(live ? live.session : null)
+  const stash = (events, completed = false) => addPending(w.id, sessRef.current.id, events, completed)
+  // An offline start has no session yet: create (or resume) it the first time we can reach the server.
+  const ensureSession = async () => {
+    if (!sessRef.current.id) sessRef.current = await api.sessions.start(w.id)
+    return sessRef.current.id
+  }
   const flush = async () => {
     if (!live) return
     const batch = queueRef.current.splice(0)
     try {
+      const sid = await ensureSession()
       if (getPending()) await syncPending()
-      if (batch.length) await api.sessions.sendEvents(live.session.id, batch)
+      if (batch.length) await api.sessions.sendEvents(sid, batch)
     } catch (e) {
       if (isNetworkError(e)) { if (batch.length) stash(batch) } else queueRef.current.unshift(...batch)
       throw e
@@ -1445,15 +1476,16 @@ function WalkPlayer({ walk: w, go, live }) {
     setFinishing(true); setFinErr('')
     try {
       await flush()
-      await api.sessions.complete(live.session.id)
-      lastWalk.summary = await api.sessions.summary(live.session.id)
+      const sid = await ensureSession()
+      await api.sessions.complete(sid)
+      lastWalk.summary = await api.sessions.summary(sid)
       await dropPackage(w.id)
       go('complete')
     } catch (e) {
       if (isNetworkError(e)) {
         // No signal at the end of the walk: keep it on the phone, show a local summary, sync later.
         const evs = queueRef.current.splice(0)
-        addPending(w.id, live.session.id, evs, true)
+        addPending(w.id, sessRef.current.id, evs, true)
         lastWalk.summary = { stops_visited: stops.length, stop_count: stops.length, distance_km: String(w.distance || '').replace(/[^\d.]/g, '') || '–', duration_min: String(w.duration || '').replace(/[^\d]/g, '') || '–', avg_rating: null, liked: false, my_rating: null, offline: true }
         go('complete')
         return
@@ -1529,36 +1561,148 @@ function WalkPlayer({ walk: w, go, live }) {
   )
 }
 
+/* ───────── GO TO THE START ───────── */
+// Before a walk begins: directions to the first stop; the Start button appears once the walker is there.
+const ALLOW_SKIP = import.meta.env.DEV || import.meta.env.VITE_ALLOW_SKIP_START === 'true'
+function StartGate({ walk: w, stop, onStart, go }) {
+  const reduced = useReducedMotion()
+  const el = useRef(null)
+  const map = useRef(null)
+  const me = useRef(null)
+  const road = useRef(null)
+  const lastKey = useRef('')
+  const [user, setUser] = useState(null)
+  const [acc, setAcc] = useState(0)
+  const [loc, setLoc] = useState('pending')   // pending | ok | denied | unavailable
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [roadM, setRoadM] = useState(null)
+  const need = Math.max(stop.radius || 30, 20)
+  const dist = user ? metres(user, stop.coords) : null
+  const arrived = dist != null && dist <= need + Math.min(acc || 0, 25)
+
+  useEffect(() => {
+    const m = L.map(el.current, { zoomControl: false, scrollWheelZoom: false, attributionControl: true, zoomAnimation: !reduced, fadeAnimation: !reduced, markerZoomAnimation: !reduced }).setView(stop.coords, 16)
+    map.current = m
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(m)
+    L.circle(stop.coords, { radius: need, color: '#E8845F', weight: 1, fillOpacity: .15 }).addTo(m)
+    L.marker(stop.coords, { icon: pinIcon(0, 'now'), keyboard: false, interactive: false }).addTo(m)
+    const ro = new ResizeObserver(() => m.invalidateSize())
+    ro.observe(el.current)
+    return () => { ro.disconnect(); m.remove(); map.current = null; me.current = null; road.current = null }
+  }, [])
+
+  useEffect(() => {
+    if (!navigator.geolocation) { setLoc('unavailable'); return }
+    const id = navigator.geolocation.watchPosition(
+      p => { setUser([p.coords.latitude, p.coords.longitude]); setAcc(p.coords.accuracy || 0); setLoc('ok') },
+      e => setLoc(e.code === 1 ? 'denied' : 'unavailable'),
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 })
+    return () => navigator.geolocation.clearWatch(id)
+  }, [])
+
+  // show the walker, and the way to the start along the streets (re-asked only after moving ~100 m)
+  useEffect(() => {
+    const m = map.current
+    if (!m || !user) return
+    if (!me.current) {
+      me.current = L.marker(user, { icon: L.divIcon({ className: 'wuser', html: '<i></i>', iconSize: [22, 22], iconAnchor: [11, 11] }), keyboard: false, interactive: false, zIndexOffset: 1000 }).addTo(m)
+      m.fitBounds(L.latLngBounds([user, stop.coords]), { padding: [40, 40] })
+    } else me.current.setLatLng(user)
+    if (!road.current) road.current = L.polyline([user, stop.coords], { color: '#E8845F', weight: 4, dashArray: '2 8', lineCap: 'round' }).addTo(m)
+    if (arrived) { road.current.setLatLngs([]); return }   // you are there: no line needed
+    const key = user[0].toFixed(3) + ',' + user[1].toFixed(3)
+    if (key === lastKey.current) return
+    lastKey.current = key
+    let stale = false
+    walkRoute([user, stop.coords]).then(r => {
+      if (stale || !road.current) return
+      if (r) { road.current.setLatLngs(r.line); road.current.setStyle({ dashArray: null }); setRoadM(r.distance) }
+      else { road.current.setLatLngs([user, stop.coords]); setRoadM(null) }
+    })
+    return () => { stale = true }
+  }, [user])
+
+  const begin = async () => { setBusy(true); setErr(''); try { await onStart() } catch (e) { setErr(friendlyError(e)); setBusy(false) } }
+  const away = roadM != null ? roadM : dist
+  const mins = away != null ? Math.max(1, Math.round(away / 80)) : null
+  const fit = () => map.current && (user ? map.current.fitBounds(L.latLngBounds([user, stop.coords]), { padding: [40, 40] }) : map.current.setView(stop.coords, 16))
+  const dir = `https://www.google.com/maps/dir/?api=1&destination=${stop.coords[0]},${stop.coords[1]}&travelmode=walking`
+  const manual = loc === 'denied' || loc === 'unavailable'
+  return (
+    <Phone caption="Head to the start">
+      <div className="screen walk-hc">
+        <div className="walk-hdr"><span className="wname">{w.t}</span><span className="wpill">Start</span></div>
+        <div className="walk-map-live" role="region" aria-label="Map to the starting point">
+          <div ref={el} className="walk-map-canvas" />
+          <div className="map-btns"><button type="button" className="map-btn" aria-label="Show me and the start" onClick={fit}><Ic i={Crosshair} size={18} /></button></div>
+        </div>
+        <div className="next-sheet" style={{ padding: '14px 18px' }}>
+          <div className="nsh-label">{arrived ? "YOU'VE ARRIVED" : 'HEAD TO THE STARTING POINT'}</div>
+          <div className="nsh-name">{stop.n}</div>
+          <div className="nsh-dist" role="status">
+            {arrived ? 'You are at the start. Put your headphones in and begin when you are ready.'
+              : loc === 'pending' ? 'Finding your location…'
+              : manual ? (loc === 'denied' ? 'Location is off, so we cannot see where you are.' : 'We cannot get your location right now.')
+              : `${fmtDist(away)} away · about ${mins} min on foot${roadM == null ? ' (straight line)' : ''}`}
+          </div>
+          {err && <div className="pay-error" role="alert" style={{ margin: '8px 0 0' }}><span>{err}</span></div>}
+          {arrived
+            ? <button type="button" className="next-btn" onClick={begin} disabled={busy}>{busy ? 'Starting…' : 'Start walk'} <Ic i={ChevronRight} size={18} /></button>
+            : <>
+                <a className="btn-ghost" href={dir} target="_blank" rel="noreferrer" style={{ display: 'block', textAlign: 'center', marginTop: 8, padding: '10px', textDecoration: 'none' }}>Open walking directions in Google Maps</a>
+                {manual && <button type="button" className="next-btn" onClick={begin} disabled={busy}>{busy ? 'Starting…' : "I'm at the start"} <Ic i={ChevronRight} size={18} /></button>}
+                {ALLOW_SKIP && !manual && <button type="button" className="end-walk-btn" style={{ margin: '8px 0 0', width: '100%' }} onClick={begin} disabled={busy}>Testing only: start without being here</button>}
+              </>}
+        </div>
+        <button type="button" className="end-walk-btn" onClick={() => go('bookings')}>Not now</button>
+      </div>
+    </Phone>
+  )
+}
+
 function Walk({ walk: w, go }) {
   const [st, setSt] = useState(LIVE ? { s: 'loading', msg: 'Preparing your walk…' } : { s: 'demo' })
   const [tryN, setTryN] = useState(0)
+  // The session (and so "walk started") only begins when the walker taps Start at the starting point.
+  const begin = async (stops, audio, saved) => {
+    let session
+    try {
+      session = await api.sessions.start(w.id)
+      savePackage(w.id, stops, session)
+    } catch (e) {
+      if (!(isNetworkError(e) && saved)) throw e
+      const pend = getPending()
+      session = { id: (pend && pend.tourId === w.id && pend.sessionId) || saved.sessionId, stops_visited: saved.stops_visited, offline: true }
+    }
+    setSt({ s: 'ready', live: { stops, audio, session } })
+  }
   useEffect(() => {
     if (!LIVE) return
     let dead = false
     setSt({ s: 'loading', msg: 'Preparing your walk…' })
     ;(async () => {
       try {
-        let stops, session
+        const saved = loadPackage(w.id)
+        let stops
         try {
           const pkg = await api.tours.package(w.id)
           stops = pkg.stops.map(x => ({ id: x.id, e: x.icon, n: x.name, d: x.blurb, coords: [x.lat, x.lng], radius: x.trigger_radius_m, audioUrl: x.audio_url }))
-          const audio = await prepareAudio(stops, (i, n) => { if (!dead) setSt({ s: 'loading', msg: `Downloading audio… ${i} of ${n}` }) })
-          session = await api.sessions.start(w.id)
-          savePackage(w.id, stops, session)
-          if (!dead) setSt({ s: 'ready', live: { stops, audio, session } })
         } catch (e) {
-          // Offline: start from the copy saved on this phone, if there is one.
-          const saved = isNetworkError(e) ? loadPackage(w.id) : null
-          if (!saved) throw e
-          const audio = await prepareAudio(saved.stops)   // all audio is already cached, so this never touches the network
-          const pend = getPending()
-          const sess = { id: (pend && pend.tourId === w.id && pend.sessionId) || saved.sessionId, stops_visited: saved.stops_visited, offline: true }
-          if (!dead) setSt({ s: 'ready', live: { stops: saved.stops, audio, session: sess } })
+          if (!(isNetworkError(e) && saved)) throw e
+          stops = saved.stops   // offline: use the copy saved on this phone
         }
+        const audio = await prepareAudio(stops, (i, n) => { if (!dead) setSt({ s: 'loading', msg: `Downloading audio… ${i} of ${n}` }) })
+        if (dead) return
+        savePackage(w.id, stops, saved ? { id: saved.sessionId, stops_visited: saved.stops_visited } : null)
+        const resuming = (saved && saved.stops_visited > 0) || bookingsData.upcoming.some(b => b.walkName === w.t && b.walkStatus === 'in_progress')
+        if (resuming) await begin(stops, audio, saved)
+        else setSt({ s: 'gate', stops, audio, saved })
       } catch (e) { if (!dead) setSt({ s: 'error', e }) }
     })()
     return () => { dead = true }
   }, [w.id, tryN])
+  if (st.s === 'gate') return <StartGate walk={w} stop={st.stops[0]} go={go} onStart={() => begin(st.stops, st.audio, st.saved).catch(e => { setSt({ s: 'error', e }) })} />
   if (st.s === 'demo') return <WalkPlayer walk={w} go={go} />
   if (st.s === 'ready') return <WalkPlayer walk={w} go={go} live={st.live} />
   const e = st.e
@@ -1741,7 +1885,7 @@ function Settings({ go }) {
 
 /* ───────── APP / PROTOTYPE NAV ───────── */
 const NAV = [
-  ['splash', '🎧 Splash'], ['about', 'About'], ['signup', 'Sign Up'], ['login', 'Login'], ['otp', 'OTP'], ['forgot', 'Forgot'], ['location-prime', '📍 Location'], '|',
+  ['splash', '🎧 Splash'], ['about', 'About'], ['welcome', 'Welcome'], ['signup', 'Sign Up'], ['login', 'Login'], ['otp', 'OTP'], ['forgot', 'Forgot'], ['location-prime', '📍 Location'], '|',
   ['home', 'Home'], ['explore', '🔍 Explore'], ['walk-detail', 'Walk Detail'], ['bookings', '🎟 Bookings'], ['passport', '📖 Passport'],
   ['neighbourhood', '🗺 Neighbourhood'], ['notifications', '🔔 Notifications'], '|',
   ['walk', 'Active Walk'], ['complete', 'Complete'], ['profile', 'Profile'], ['settings', 'Settings'],
@@ -1750,7 +1894,7 @@ const NAV = [
 const USER_PAGES = ['bookings', 'passport', 'notifications', 'profile', 'settings', 'walk', 'complete']
 
 export default function App() {
-  const [page, setPage] = useState('splash')
+  const [page, setPage] = useState(() => { try { return LIVE && localStorage.getItem('nob.seenIntro') ? 'welcome' : 'splash' } catch { return 'splash' } })
   const [walk, setWalk] = useState(walks[0])
   const [nb, setNb] = useState(neighbourhoods[0])
   const [earned, setEarned] = useState(false)
@@ -1798,6 +1942,7 @@ export default function App() {
   const screens = {
     splash: <Splash go={go} />,
     about: <About go={go} />,
+    welcome: <Welcome go={go} onAuthed={onAuthed} />,
     signup: <Signup go={go} onAuthed={onAuthed} />,
     login: <Login go={go} onAuthed={onAuthed} notice={notice} />,
     otp: <OtpLogin go={go} onAuthed={onAuthed} />,

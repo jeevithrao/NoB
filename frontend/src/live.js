@@ -246,3 +246,28 @@ export function syncPending() {
   })().finally(() => { syncing = null })
   return syncing
 }
+
+
+// ───────── walking routes ─────────
+// Streets, not straight lines: ask the public OSM foot router for the path through the given points.
+// Tour routes are cached on the phone (so they also show offline); on any failure the caller keeps the straight line.
+const ROUTER = import.meta.env.VITE_ROUTER_URL || 'https://routing.openstreetmap.de/routed-foot/route/v1/foot'
+const routeMem = new Map()
+export async function walkRoute(points, { persist = false } = {}) {
+  if (points.length < 2) return null
+  const key = points.map(([a, b]) => a.toFixed(5) + ',' + b.toFixed(5)).join(';')
+  if (routeMem.has(key)) return routeMem.get(key)
+  if (persist) { const c = lsGet('nob.route.' + key); if (c) { routeMem.set(key, c); return c } }
+  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 9000)
+  try {
+    const r = await fetch(`${ROUTER}/${points.map(([a, b]) => `${b},${a}`).join(';')}?overview=full&geometries=geojson`, { signal: ctl.signal })
+    if (!r.ok) return null
+    const j = await r.json()
+    const rt = j.routes && j.routes[0]
+    if (!rt) return null
+    const out = { line: rt.geometry.coordinates.map(([lng, lat]) => [lat, lng]), distance: rt.distance }
+    routeMem.set(key, out)
+    if (persist) lsSet('nob.route.' + key, out)
+    return out
+  } catch { return null } finally { clearTimeout(timer) }
+}
