@@ -29,7 +29,7 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.core.rate_limit import client_ip, limiter
+from app.core.rate_limit import client_ip, throttle
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import User, UserLoginSession
@@ -57,14 +57,14 @@ def _api_error(status_code: int, code: str, message: str) -> HTTPException:
     return HTTPException(status_code=status_code, detail={"error": {"code": code, "message": message}})
 
 
-def _throttle(request: Request, scope: str, account: str | None = None) -> None:
+async def _throttle(request: Request, scope: str, account: str | None = None) -> None:
     """Rate-limit by client IP and (when known) by account, so credential
     stuffing from one IP *and* a distributed attack on one account are both
     slowed down."""
     limit = settings.RATE_LIMIT_AUTH_PER_MINUTE
-    limiter.hit(f"{scope}:ip:{client_ip(request)}", limit)
+    await throttle(f"{scope}:ip:{client_ip(request)}", limit)
     if account:
-        limiter.hit(f"{scope}:acct:{account.strip().lower()}", limit)
+        await throttle(f"{scope}:acct:{account.strip().lower()}", limit)
 
 
 async def _issue_tokens(db: AsyncSession, user: User, device_identifier: str) -> TokenResponse:
@@ -107,7 +107,7 @@ async def _issue_tokens(db: AsyncSession, user: User, device_identifier: str) ->
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def signup(body: SignupRequest, request: Request, db: AsyncSession = Depends(get_db)):
     email = body.email.strip().lower()
-    _throttle(request, "signup", email)
+    await _throttle(request, "signup", email)
     existing = await db.execute(select(User).where(func.lower(User.email) == email))
     if existing.scalar_one_or_none() is not None:
         raise _api_error(status.HTTP_409_CONFLICT, "EMAIL_TAKEN", "An account with this email already exists.")
@@ -129,7 +129,7 @@ async def signup(body: SignupRequest, request: Request, db: AsyncSession = Depen
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     email = body.email.strip().lower()
-    _throttle(request, "login", email)
+    await _throttle(request, "login", email)
     result = await db.execute(select(User).where(func.lower(User.email) == email))
     user = result.scalar_one_or_none()
     if user is None or not verify_password(body.password, user.password_hash):
@@ -150,7 +150,7 @@ async def google_sign_in(body: GoogleSignInRequest, request: Request, db: AsyncS
     If GOOGLE_CLIENT_ID is not configured, returns 501 so tests can skip
     this path cleanly without a real Google project.
     """
-    _throttle(request, "google")
+    await _throttle(request, "google")
     if not settings.GOOGLE_CLIENT_ID:
         raise _api_error(
             status.HTTP_501_NOT_IMPLEMENTED,
@@ -222,7 +222,7 @@ async def request_otp(body: OtpRequestBody, request: Request, db: AsyncSession =
         and a new code invalidates any older unused one.
     """
     email = body.email.strip().lower()
-    _throttle(request, "otp-request", email)
+    await _throttle(request, "otp-request", email)
     try:
         raw_otp = await otp_service.issue_code(db, email, "login")
     except otp_service.OtpError as exc:
@@ -246,7 +246,7 @@ async def verify_otp(body: OtpVerifyRequest, request: Request, db: AsyncSession 
       - success ........... record marked used; user get-or-created; tokens issued
     """
     email = body.email.strip().lower()
-    _throttle(request, "otp-verify", email)
+    await _throttle(request, "otp-verify", email)
     try:
         await otp_service.consume_code(db, email, body.otp, "login")
     except otp_service.OtpError as exc:
@@ -276,7 +276,7 @@ async def forgot_password(body: ForgotPasswordRequest, request: Request, db: Asy
     """Email a reset code. The response (and the rate limiting) is identical
     whether or not the account exists; the email is only sent if it does."""
     email = body.email.strip().lower()
-    _throttle(request, "forgot", email)
+    await _throttle(request, "forgot", email)
     try:
         raw_code = await otp_service.issue_code(db, email, "reset")
     except otp_service.OtpError as exc:
@@ -298,7 +298,7 @@ async def forgot_password(body: ForgotPasswordRequest, request: Request, db: Asy
 async def reset_password(body: ResetPasswordRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Set a new password with the emailed code. Signs the account out everywhere."""
     email = body.email.strip().lower()
-    _throttle(request, "reset", email)
+    await _throttle(request, "reset", email)
     try:
         await otp_service.consume_code(db, email, body.otp, "reset")
     except otp_service.OtpError as exc:

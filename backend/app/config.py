@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     # Rate limits (per client IP and per account, sliding 60s window).
     # In-memory, so counts are per-process; fine for a single API container.
     RATE_LIMIT_AUTH_PER_MINUTE: int = 10
+    # "memory" = per process (fine for one worker, used in development); "postgres" = shared by every worker and
+    # container; "auto" = memory in development, postgres everywhere else.
+    RATE_LIMIT_BACKEND: str = "auto"
 
     # Admin bootstrap used by `python -m app.seed` (never hardcode these).
     ADMIN_EMAIL: str = "admin@nob.app"
@@ -91,6 +94,12 @@ class Settings(BaseSettings):
     @property
     def media_signing_key(self) -> str:
         return self.MEDIA_SIGNING_KEY or self.SECRET_KEY
+
+    @property
+    def rate_limit_backend(self) -> str:
+        if self.RATE_LIMIT_BACKEND == "auto":
+            return "memory" if self.ENVIRONMENT == "development" else "postgres"
+        return self.RATE_LIMIT_BACKEND
 
     @property
     def allowed_origins_list(self) -> List[str]:

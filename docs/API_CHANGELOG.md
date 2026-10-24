@@ -124,3 +124,7 @@ In-app only (no push in v1). Created automatically, idempotently, and skipped fo
 ## Deployment
 - Compose requires `DB_PASSWORD` (no default password), backend healthcheck, nginx waits for it and mounts TLS certs from `./certs`.
 - See `docs/DEPLOYMENT.md` (untested end to end) and `docs/LEGAL_NOTES.md`.
+
+## Rate limiting and batch cap
+- Auth rate limits are now shared across workers (Postgres `rate_limit_hits`, migration 0010). Same `429 RATE_LIMITED` response and `Retry-After` header.
+- `POST /sessions/{id}/events/batch` accepts at most 200 events per request (`422` above that). Clients with a longer offline queue must send several batches.

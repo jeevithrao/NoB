@@ -13,3 +13,5 @@ from app.models.tour_rating import TourRating
 from app.models.otp_request import OtpRequest
 from app.models.payment_event import PaymentEvent
 from app.models.notification import Notification
+
+from app.models.rate_limit_hit import RateLimitHit

@@ -30,7 +30,7 @@ Razorpay webhook URL: `https://<domain>/webhooks/payment`.
 
 ## Known gaps
 - Media is on local disk (`backend/media`), served by nginx. For scale, move audio to object storage + CDN (the signed-URL layer is the seam to change).
-- Rate limits are per worker process (4 workers), not global. Use Redis or nginx limits for a stricter guarantee.
+- Auth rate limits are shared across workers and containers (Postgres table `rate_limit_hits`, `RATE_LIMIT_BACKEND=auto` → postgres outside development). A fixed window can allow up to 2x the limit across a minute boundary.
 - No backups configured: schedule `pg_dump` and back up `backend/media`.
 - No monitoring or error tracking yet.
 - Placeholder audio and seed data must be replaced with real content.

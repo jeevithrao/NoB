@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.common import ORMBase
 from app.schemas.tour import NeighbourhoodRef
@@ -32,7 +32,7 @@ class SessionEventIn(BaseModel):
 
 
 class SessionEventBatchRequest(BaseModel):
-    events: list[SessionEventIn]
+    events: list[SessionEventIn] = Field(max_length=200)
 
 
 class SessionEventBatchResponse(BaseModel):
